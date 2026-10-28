@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture shop – login</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Fixture shop</h1>
+    <form id="login-form" action="dashboard.html" method="get">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" placeholder="Your username" data-testid="username">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" placeholder="Password" data-testid="password">
+      <label class="row"><input id="remember" type="checkbox" name="remember"> Remember me</label>
+      <button type="submit" class="btn primary" data-testid="login">Log in</button>
+    </form>
+    <p class="hint">Any username works. Use password <code>secret</code>.</p>
+  </main>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      if (document.getElementById('password').value !== 'secret') {
+        e.preventDefault();
+        let err = document.querySelector('.error');
+        if (!err) {
+          err = document.createElement('p');
+          err.className = 'error';
+          err.setAttribute('role', 'alert');
+          document.querySelector('form').append(err);
+        }
+        err.textContent = 'Wrong password';
+      }
+    });
+  </script>
+</body>
+</html>

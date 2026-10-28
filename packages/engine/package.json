@@ -1,0 +1,10 @@
+{
+  "name": "@uitester/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@uitester/core": "*",
+    "playwright-core": "1.48.2"
+  }
+}

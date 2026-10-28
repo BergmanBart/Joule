@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture shop – dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card wide">
+    <h1 id="welcome">Welcome</h1>
+    <label for="size">Size</label>
+    <select id="size" name="size">
+      <option value="s">Small</option>
+      <option value="m">Medium</option>
+      <option value="l">Large</option>
+    </select>
+    <ul class="items">
+      <li>Apple <button class="btn delete">Delete</button></li>
+      <li>Pear <button class="btn delete">Delete</button></li>
+    </ul>
+    <button id="add" class="btn">Add item</button>
+    <button id="slow" class="btn">Load later</button>
+    <p id="status" aria-live="polite"></p>
+    <a href="index.html" id="logout">Log out</a>
+  </main>
+  <script>
+    const user = new URLSearchParams(location.search).get('username') || 'guest';
+    document.getElementById('welcome').textContent = 'Welcome ' + user;
+    document.querySelector('.items').addEventListener('click', (e) => {
+      if (e.target.matches('.delete')) e.target.closest('li').remove();
+    });
+    let n = 0;
+    document.getElementById('add').addEventListener('click', () => {
+      const li = document.createElement('li');
+      li.innerHTML = 'Item ' + ++n + ' <button class="btn delete">Delete</button>';
+      document.querySelector('.items').append(li);
+    });
+    document.getElementById('slow').addEventListener('click', () => {
+      setTimeout(() => (document.getElementById('status').textContent = 'Loaded'), 1500);
+    });
+    document.getElementById('size').addEventListener('change', (e) => {
+      document.getElementById('status').textContent = 'Size ' + e.target.selectedOptions[0].text;
+    });
+  </script>
+</body>
+</html>
