@@ -295,7 +295,8 @@ def pause_for_key(message="Paused by UITester. Press any key to continue..."):
     stdin = sys.__stdin__
     if os.environ.get("UITESTER_PAUSE") == "stdin" and stdin is not None:
         # Started from the UITester app: it shows a Continue button and writes a newline.
-        sys.__stdout__.write("[UITESTER-PAUSE] " + message + "\\n")
+        # leading newline: Robot's console may be mid-line (test name printed, status pending)
+        sys.__stdout__.write("\\n[UITESTER-PAUSE] " + message + "\\n")
         sys.__stdout__.flush()
         stdin.readline()
         return

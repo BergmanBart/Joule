@@ -167,4 +167,29 @@ describe('robot runner', async () => {
     );
     expect(result.ok).toBe(true);
   }, 180_000);
+
+  it.runIf(deps.ok)('pauses a Robot run until the app says continue', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'uitester-pause-'));
+    const p = newProject('Pause', URL);
+    p.settings.browser = 'msedge';
+    p.tests[0].steps = [{ id: 'pz', name: '', type: 'pause', message: 'Check the page' }];
+    const saved = await saveProject(dir, Project.parse(p));
+    let paused = '';
+    const run: RobotRun = new RobotRun({
+      projectDir: dir,
+      project: saved,
+      python: deps.python!.path,
+      env: 'TEST',
+      headless: true,
+      parallel: false,
+      onLine: () => {},
+      onPause: (m) => {
+        paused = m;
+        setTimeout(() => run.continue(), 300);
+      },
+    });
+    const result = await run.run();
+    expect(paused).toBe('Check the page');
+    expect(result.ok).toBe(true);
+  }, 120_000);
 });

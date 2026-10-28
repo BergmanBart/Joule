@@ -1,5 +1,5 @@
 {
-  "name": "@uitester/cli",
+  "name": "uitester",
   "version": "0.1.0",
   "type": "module",
   "bin": {
@@ -7,9 +7,21 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts --dev",
-    "start": "tsx src/cli.ts"
+    "start": "tsx src/cli.ts",
+    "build": "node build.mjs"
   },
   "dependencies": {
+    "playwright-core": "1.48.2"
+  },
+  "description": "Build, maintain and run UI tests visually; saved as Robot Framework files.",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
     "@uitester/core": "*",
     "@uitester/engine": "*",
     "@uitester/server": "*"

@@ -100,8 +100,12 @@ export class RobotRun {
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (line.startsWith('[UITESTER-PAUSE]')) o.onPause(line.slice(16).trim());
-          else o.onLine(line);
+          const marker = line.indexOf('[UITESTER-PAUSE]');
+          if (marker < 0) o.onLine(line);
+          else {
+            if (marker > 0) o.onLine(line.slice(0, marker));
+            o.onPause(line.slice(marker + 16).trim());
+          }
         }
       };
       child.stdout.on('data', onData);

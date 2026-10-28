@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, extname, join, normalize, parse, resolve, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -396,7 +397,8 @@ export async function startServer(opts: ServerOptions) {
   });
 
   await new Promise<void>((r) => http.listen(opts.port, opts.host ?? '127.0.0.1', r));
-  const address = `http://${opts.host ?? '127.0.0.1'}:${opts.port}/`;
+  // port 0 = any free port (used by the VS Code and Electron shells)
+  const address = `http://${opts.host ?? '127.0.0.1'}:${(http.address() as AddressInfo).port}/`;
 
   return {
     url: address,
