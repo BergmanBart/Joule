@@ -1,5 +1,6 @@
 import { ENVIRONMENTS } from '../model';
 import type { Assertion, ElementStep, Keyword, Locator, Project, Settings, Step, Test } from '../model';
+import { PARAM_NAME } from '../factory';
 import { parameterValue } from '../params';
 import { buildSelector } from '../selector';
 import { arg, fileName, robotName, row, suiteNameFromFile } from './escape';
@@ -138,6 +139,25 @@ function stepLines(step: Step, ctx: Ctx, depth: number): string[] {
   }
 }
 
+/** Robot cells normalized to single 4-space separators, for comparing generated and parsed lines. */
+export function normalizeRow(line: string): string {
+  return line.trim().split(/\s{2,}|\t/).join('    ');
+}
+
+/**
+ * The line a leaf step generates (for an if: its condition call), used by the importer to
+ * recognise unchanged steps and keep their ids and recorded element details.
+ */
+export function stepSignature(step: Step, keywordNames: Map<string, string> = new Map()): string | undefined {
+  if (step.type === 'group') return undefined;
+  if (step.type === 'if') {
+    const cond = assertionCells(sel(step.condition.locator), step.condition.assertion);
+    return normalizeRow(row('Run Keyword And Return Status', ...cond));
+  }
+  const ctx: Ctx = { keywords: [], keywordNames, namer: new KeywordNamer(), local: [], ifCounter: { n: 0 } };
+  return stepLines(step, ctx, 0).map(normalizeRow).join('\n');
+}
+
 function stepsLines(steps: Step[], ctx: Ctx, depth: number): string[] {
   if (!steps.length) return [IND.repeat(depth) + 'No Operation'];
   return steps.flatMap((s) => stepLines(s, ctx, depth));
@@ -190,7 +210,7 @@ function testFile(project: Project, test: Test, keywordNames: Map<string, string
     '',
     '*** Variables ***',
     row('${ENV}', project.settings.environment),
-    ...test.parameters.map((p) => row(`\${${p.name}}`, arg(parameterValue(p, project.settings.environment)))),
+    ...test.parameters.filter((p) => PARAM_NAME.test(p.name)).map((p) => row(`\${${p.name}}`, arg(parameterValue(p, project.settings.environment)))),
     '',
     '*** Test Cases ***',
     robotName(test.name),
@@ -298,7 +318,7 @@ function pyString(value: string): string {
 
 function envFile(project: Project, env: (typeof ENVIRONMENTS)[number]): string {
   const lines = [`# UITester parameters for environment ${env}. Generated; edit parameters in UITester.`];
-  for (const p of project.parameters) lines.push(`${p.name} = ${pyString(parameterValue(p, env))}`);
+  for (const p of project.parameters) if (PARAM_NAME.test(p.name)) lines.push(`${p.name} = ${pyString(parameterValue(p, env))}`);
   return lines.join('\n') + '\n';
 }
 

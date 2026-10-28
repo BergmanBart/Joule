@@ -1,0 +1,503 @@
+import { AlertTriangle, CheckCircle2, Crosshair, ExternalLink, Link2Off, Puzzle, Ungroup, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import {
+  availableProps,
+  buildSelector,
+  describeStep,
+  findStep,
+  interpolate,
+  isCheckable,
+  isSelect,
+  isTextInput,
+  OPERATORS,
+  type ActionKind,
+  type Assertion,
+  type ElementDescriptor,
+  type Locator,
+  type Step,
+} from '@uitester/core';
+import { api } from '../api';
+import { NumberField, TextField } from '../components/ui';
+import { stepMeta, TypeIcon } from '../stepMeta';
+import { clearSelection, containerSteps, makeReusable, selectContainer, ungroup, unlinkKeyword, updateCurrentStep, useStore } from '../store';
+import { useParams } from './BrowserPanel';
+
+type Upd = (fn: (s: Step) => Step) => void;
+
+function actionsFor(d: ElementDescriptor): ActionKind[] {
+  if (isTextInput(d)) return ['fill', 'click', 'dblclick', 'rightclick', 'press', 'hover'];
+  if (isSelect(d)) return ['select', 'click', 'hover'];
+  if (isCheckable(d)) return ['check', 'uncheck', 'click', 'hover'];
+  // buttons and every other element
+  return ['click', 'dblclick', 'rightclick', 'hover', 'press'];
+}
+
+const ACTION_NAMES: Record<ActionKind, string> = {
+  click: 'Click',
+  dblclick: 'Double click',
+  rightclick: 'Right click',
+  fill: 'Enter text',
+  hover: 'Hover',
+  select: 'Select option',
+  check: 'Check',
+  uncheck: 'Uncheck',
+  press: 'Press key',
+};
+
+const STATES = ['visible', 'hidden', 'enabled', 'disabled', 'checked', 'unchecked', 'editable', 'attached', 'detached'];
+
+function ParamList() {
+  const project = useStore((s) => s.project);
+  const params = useParams();
+  return (
+    <datalist id="param-refs">
+      {Object.keys(params).map((n) => (
+        <option key={n} value={`\${${n}}`} />
+      ))}
+      {project?.parameters.length === 0 && null}
+    </datalist>
+  );
+}
+
+/** Text field with a ${param} picker next to it. */
+function ValueField({ value, onCommit, placeholder }: { value: string; onCommit: (v: string) => void; placeholder?: string }) {
+  const params = useParams();
+  const resolved = interpolate(value, params);
+  return (
+    <>
+      <div className="row">
+        <div className="grow">
+          <TextField value={value} onCommit={onCommit} placeholder={placeholder} list="param-refs" mono />
+        </div>
+        <select className="select" style={{ width: 42 }} value="" title="Insert a parameter" onChange={(e) => e.target.value && onCommit(value + `\${${e.target.value}}`)}>
+          <option value="">$</option>
+          {Object.keys(params).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </div>
+      {resolved !== value && <div className="muted mono" style={{ marginTop: 4 }}>= {resolved}</div>}
+    </>
+  );
+}
+
+function MatchCount({ selector }: { selector: string }) {
+  const [state, setState] = useState<{ count: number; error?: string } | null>(null);
+  const status = useStore((s) => s.view.status);
+  const url = useStore((s) => s.view.url);
+  useEffect(() => {
+    if (status !== 'ready') return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const r = await api.request('view.count', { selector }).catch(() => null);
+      if (!cancelled) setState(r);
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [selector, status, url]);
+  if (!state) return null;
+  if (state.error) return <div className="notice err"><AlertTriangle size={14} /> Invalid selector: {state.error}</div>;
+  if (state.count === 1)
+    return (
+      <div className="row" style={{ marginBottom: 10 }}>
+        <span className="badge ok">
+          <CheckCircle2 size={12} /> Finds exactly 1 element
+        </span>
+      </div>
+    );
+  return (
+    <div className="notice warn">
+      <AlertTriangle size={14} />
+      <span>
+        {state.count === 0
+          ? 'Finds no element on the current page. That is fine if the element only appears later in the test.'
+          : `Finds ${state.count} elements (shown with dashed outlines). Robot Framework's strict mode will fail on this; add more search properties.`}
+      </span>
+    </div>
+  );
+}
+
+function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Locator; onChange: (l: Locator) => void; pickField: 'element' | 'wait' | 'condition'; stepId: string }) {
+  const params = useParams();
+  const props = availableProps(locator.props);
+  const selector = buildSelector(locator);
+  const use = new Set(locator.use);
+  const toggle = (key: string) => {
+    const next = new Set(use);
+    if (next.has(key)) next.delete(key);
+    else {
+      // xpath / css path are exclusive with the other properties
+      if (key === 'xpath' || key === 'css') next.clear();
+      else {
+        next.delete('xpath');
+        next.delete('css');
+      }
+      next.add(key);
+    }
+    onChange({ ...locator, use: props.map((p) => p.key).filter((k) => next.has(k)), custom: undefined });
+  };
+  const picking = useStore((s) => s.pickTarget?.stepId === stepId);
+  return (
+    <div className="section">
+      <div className="row" style={{ marginBottom: 8 }}>
+        <span className="label grow">Search details</span>
+        <button
+          className={`btn small${picking ? ' primary' : ''}`}
+          title="Pick the element again in the browser view"
+          onClick={() => useStore.setState({ pickTarget: picking ? null : { stepId, field: pickField } })}
+        >
+          <Crosshair size={12} /> {picking ? 'Click in browser…' : 'Pick element'}
+        </button>
+      </div>
+      {!locator.custom && (
+        <div className="prop-list">
+          {props.map((p) => (
+            <label key={p.key} className="prop">
+              <input type="checkbox" checked={use.has(p.key)} onChange={() => toggle(p.key)} style={{ accentColor: 'var(--accent)' }} />
+              <span className="k">{p.label}</span>
+              <span className="v" title={p.value}>
+                {p.value}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="field">
+        <label>{locator.custom ? 'Custom selector' : 'Selector'}</label>
+        {locator.custom !== undefined ? (
+          <TextField value={locator.custom} onCommit={(v) => onChange({ ...locator, custom: v || undefined })} mono placeholder="css=… / xpath=… / text=…" />
+        ) : (
+          <div className="selector-preview">{selector}</div>
+        )}
+        <div className="row">
+          {locator.custom === undefined ? (
+            <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: selector })}>
+              Edit as custom selector
+            </button>
+          ) : (
+            locator.props.tag !== '*' && (
+              <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: undefined })}>
+                Back to property selection
+              </button>
+            )
+          )}
+        </div>
+      </div>
+      <MatchCount selector={interpolate(selector, params)} />
+    </div>
+  );
+}
+
+function AssertionEditor({ assertion, onChange }: { assertion: Assertion; onChange: (a: Assertion) => void }) {
+  return (
+    <>
+      <div className="field">
+        <label>Assert that</label>
+        <div className="row">
+          <select className="select grow" value={assertion.property} onChange={(e) => onChange({ ...assertion, property: e.target.value as Assertion['property'], expected: e.target.value === 'state' ? 'visible' : assertion.expected })}>
+            <option value="text">Text</option>
+            <option value="value">Value (inputs)</option>
+            <option value="attribute">Attribute</option>
+            <option value="count">Number of elements</option>
+            <option value="state">State</option>
+          </select>
+          {assertion.property === 'attribute' && <TextField value={assertion.name ?? ''} onCommit={(v) => onChange({ ...assertion, name: v })} placeholder="e.g. title" />}
+        </div>
+      </div>
+      {assertion.property === 'state' ? (
+        <div className="field">
+          <label>Is</label>
+          <div className="row">
+            <select className="select" style={{ width: 110 }} value={assertion.operator === '!=' ? '!=' : '=='} onChange={(e) => onChange({ ...assertion, operator: e.target.value as Assertion['operator'] })}>
+              <option value="==">is</option>
+              <option value="!=">is not</option>
+            </select>
+            <select className="select grow" value={assertion.expected} onChange={(e) => onChange({ ...assertion, expected: e.target.value })}>
+              {STATES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="field">
+            <label>Operator</label>
+            <select className="select" value={assertion.operator} onChange={(e) => onChange({ ...assertion, operator: e.target.value as Assertion['operator'] })}>
+              {OPERATORS.map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Expected value (text or $&#123;parameter&#125;)</label>
+            <ValueField value={assertion.expected} onCommit={(v) => onChange({ ...assertion, expected: v })} />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function ElementDetails({ step, upd }: { step: Extract<Step, { type: 'element' }>; upd: Upd }) {
+  const d = step.locator.props;
+  const kinds = actionsFor(d);
+  const set = (patch: Partial<typeof step>) => upd((s) => ({ ...s, ...patch }) as Step);
+  return (
+    <>
+      <div className="field">
+        <label>Type</label>
+        <div className="segmented" style={{ alignSelf: 'flex-start' }}>
+          <button className={step.mode === 'action' ? 'on' : ''} onClick={() => set({ mode: 'action', action: step.action ?? { kind: kinds[0] } })}>
+            Action
+          </button>
+          <button className={step.mode === 'assert' ? 'on' : ''} onClick={() => set({ mode: 'assert', assertion: step.assertion ?? { property: 'text', operator: '==', expected: d.text ?? '' } })}>
+            Assertion
+          </button>
+        </div>
+      </div>
+      {step.mode === 'action' ? (
+        <>
+          <div className="field">
+            <label>Action</label>
+            <select className="select" value={step.action?.kind ?? 'click'} onChange={(e) => set({ action: { kind: e.target.value as ActionKind, value: step.action?.value } })}>
+              {[...new Set([...kinds, step.action?.kind ?? 'click'])].map((k) => (
+                <option key={k} value={k}>
+                  {ACTION_NAMES[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {(step.action?.kind === 'fill' || step.action?.kind === 'select' || step.action?.kind === 'press') && (
+            <div className="field">
+              <label>{step.action.kind === 'fill' ? 'Text to enter' : step.action.kind === 'select' ? 'Option label' : 'Key (e.g. Enter, Tab, Control+A)'}</label>
+              <ValueField value={step.action.value ?? ''} onCommit={(v) => set({ action: { ...step.action!, value: v } })} placeholder={step.action.kind === 'fill' ? 'Text or ${PARAMETER}' : ''} />
+            </div>
+          )}
+        </>
+      ) : (
+        <AssertionEditor assertion={step.assertion ?? { property: 'text', operator: '==', expected: '' }} onChange={(a) => set({ assertion: a })} />
+      )}
+      <LocatorEditor locator={step.locator} onChange={(l) => set({ locator: l })} pickField="element" stepId={step.id} />
+    </>
+  );
+}
+
+function WaitDetails({ step, upd }: { step: Extract<Step, { type: 'wait' }>; upd: Upd }) {
+  const w = step.wait;
+  const setWait = (wait: typeof w) => upd((s) => ({ ...s, wait }) as Step);
+  return (
+    <>
+      <div className="field">
+        <label>Wait for</label>
+        <div className="segmented" style={{ alignSelf: 'flex-start' }}>
+          <button className={w.kind === 'time' ? 'on' : ''} onClick={() => setWait({ kind: 'time', seconds: 1 })}>
+            Time
+          </button>
+          <button className={w.kind === 'load' ? 'on' : ''} onClick={() => setWait({ kind: 'load', state: 'load' })}>
+            Page load
+          </button>
+          <button
+            className={w.kind === 'element' ? 'on' : ''}
+            onClick={() => {
+              if (w.kind !== 'element') useStore.setState({ pickTarget: { stepId: step.id, field: 'wait' } });
+            }}
+          >
+            Element
+          </button>
+        </div>
+      </div>
+      {w.kind === 'time' && (
+        <div className="field">
+          <label>Seconds</label>
+          <NumberField value={w.seconds} min={0} step={0.5} onCommit={(seconds) => setWait({ ...w, seconds })} />
+        </div>
+      )}
+      {w.kind === 'load' && (
+        <div className="field">
+          <label>Until</label>
+          <select className="select" value={w.state} onChange={(e) => setWait({ ...w, state: e.target.value as typeof w.state })}>
+            <option value="load">Page loaded (load)</option>
+            <option value="domcontentloaded">HTML parsed (domcontentloaded)</option>
+            <option value="networkidle">No network activity (networkidle)</option>
+          </select>
+        </div>
+      )}
+      {w.kind === 'element' && (
+        <>
+          <div className="field">
+            <label>Until the element is</label>
+            <select className="select" value={w.state} onChange={(e) => setWait({ ...w, state: e.target.value as typeof w.state })}>
+              {['visible', 'hidden', 'attached', 'detached', 'enabled'].map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Timeout (seconds, empty = project timeout)</label>
+            <TextField value={w.timeoutSeconds ? String(w.timeoutSeconds) : ''} onCommit={(v) => setWait({ ...w, timeoutSeconds: Number(v) > 0 ? Number(v) : undefined })} />
+          </div>
+          <LocatorEditor locator={w.locator} onChange={(locator) => setWait({ ...w, locator })} pickField="wait" stepId={step.id} />
+        </>
+      )}
+      {w.kind !== 'element' && useStore.getState().pickTarget?.stepId === step.id && <div className="notice info"><Crosshair size={14} /> Click the element to wait for in the browser view.</div>}
+    </>
+  );
+}
+
+function StepDetails({ step }: { step: Step }) {
+  const project = useStore((s) => s.project)!;
+  const upd: Upd = (fn) => updateCurrentStep(step.id, fn);
+  switch (step.type) {
+    case 'element':
+      return <ElementDetails step={step} upd={upd} />;
+    case 'wait':
+      return <WaitDetails step={step} upd={upd} />;
+    case 'pause':
+      return (
+        <>
+          <div className="notice info">The test stops here until you continue: with the Continue button in the app, or by pressing a key in the terminal when the .robot file runs on its own.</div>
+          <div className="field">
+            <label>Message</label>
+            <TextField value={step.message ?? ''} onCommit={(v) => upd((s) => ({ ...s, message: v || undefined }) as Step)} placeholder="Paused. Press any key to continue..." />
+          </div>
+        </>
+      );
+    case 'screenshot':
+      return (
+        <>
+          <div className="field">
+            <label>File name (saved in {project.settings.screenshotDir}/)</label>
+            <ValueField value={step.filename} onCommit={(v) => upd((s) => ({ ...s, filename: v || 'screenshot' }) as Step)} />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={step.fullPage} onChange={(e) => upd((s) => ({ ...s, fullPage: e.target.checked }) as Step)} /> Full page
+          </label>
+        </>
+      );
+    case 'if':
+      return (
+        <>
+          <div className="notice info">The Then steps run when the condition is true, the Else steps otherwise. Drag steps into the branches, or use + next to Then / Else.</div>
+          <AssertionEditor assertion={step.condition.assertion} onChange={(a) => upd((s) => (s.type === 'if' ? { ...s, condition: { ...s.condition, assertion: a } } : s))} />
+          <LocatorEditor
+            locator={step.condition.locator}
+            onChange={(l) => upd((s) => (s.type === 'if' ? { ...s, condition: { ...s.condition, locator: l } } : s))}
+            pickField="condition"
+            stepId={step.id}
+          />
+        </>
+      );
+    case 'group':
+      return (
+        <>
+          <div className="row wrap">
+            <button className="btn small" onClick={() => makeReusable(step.id)} title="Turn this group into a keyword that can be used in every test; changes apply everywhere">
+              <Puzzle size={13} /> Make reusable
+            </button>
+            <button className="btn small" onClick={() => ungroup(step.id)}>
+              <Ungroup size={13} /> Ungroup
+            </button>
+          </div>
+          <p className="muted">{step.steps.length} step(s). Copy (Ctrl+C) and paste (Ctrl+V) the group into another test to reuse it as an independent copy.</p>
+        </>
+      );
+    case 'keywordCall': {
+      const kw = project.keywords.find((k) => k.id === step.keywordId);
+      const uses = project.tests.filter((t) => JSON.stringify(t.steps).includes(`"keywordId":"${step.keywordId}"`)).length;
+      return (
+        <>
+          <div className="field">
+            <label>Keyword</label>
+            <select className="select" value={step.keywordId} onChange={(e) => upd((s) => ({ ...s, keywordId: e.target.value }) as Step)}>
+              {!kw && <option value={step.keywordId}>Missing keyword</option>}
+              {project.keywords.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {kw && <p className="muted">Linked: used in {uses} test(s). Editing the keyword changes it everywhere.</p>}
+          <div className="row wrap">
+            {kw && (
+              <button className="btn small" onClick={() => selectContainer({ kind: 'keyword', id: kw.id })}>
+                <ExternalLink size={13} /> Edit keyword
+              </button>
+            )}
+            {kw && (
+              <button className="btn small" onClick={() => unlinkKeyword(step.id)} title="Replace by an independent copy of its steps">
+                <Link2Off size={13} /> Unlink (make a copy)
+              </button>
+            )}
+          </div>
+        </>
+      );
+    }
+    case 'raw':
+      return (
+        <>
+          <div className="notice info">Robot Framework lines, kept exactly as written. They run with Robot Framework but are skipped when running inside the app.</div>
+          <RawEditor step={step} />
+        </>
+      );
+  }
+}
+
+function RawEditor({ step }: { step: Extract<Step, { type: 'raw' }> }) {
+  const [text, setText] = useState(step.lines.join('\n'));
+  useEffect(() => setText(step.lines.join('\n')), [step.lines]);
+  return (
+    <textarea
+      className="textarea"
+      rows={8}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => e.stopPropagation()}
+      onBlur={() => updateCurrentStep(step.id, (s) => ({ ...s, lines: text.split('\n').filter((l) => l.trim()) }) as Step)}
+    />
+  );
+}
+
+export function DetailsPanel() {
+  const project = useStore((s) => s.project);
+  const current = useStore((s) => s.current);
+  const detail = useStore((s) => s.detail);
+  const selected = useStore((s) => s.selected);
+  const run = useStore((s) => s.run);
+  const step = detail ? findStep(containerSteps(project, current), detail) : undefined;
+  if (!project || !step) return null;
+  const state = run.steps[step.id];
+  return (
+    <>
+      <div className="column-header">
+        <span className="title">{stepMeta(step).label} details</span>
+        {selected.length > 1 && <span className="badge">{selected.length} selected</span>}
+        <button className="icon-btn" title="Close details and deselect (Esc)" onClick={clearSelection}>
+          <X size={16} />
+        </button>
+      </div>
+      <div className="column-body details">
+        <ParamList />
+        <h3>
+          <TypeIcon step={step} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{describeStep(step, project.keywords)}</span>
+        </h3>
+        {state?.status === 'fail' && state.message && (
+          <div className="notice err">
+            <AlertTriangle size={14} /> {state.message}
+          </div>
+        )}
+        <div className="field">
+          <label>Name {step.type !== 'group' && <span className="muted">(optional)</span>}</label>
+          <TextField value={step.name} onCommit={(v) => updateCurrentStep(step.id, (s) => ({ ...s, name: v }))} placeholder={step.type === 'group' ? 'Group name' : describeStep({ ...step, name: '' }, project.keywords)} />
+        </div>
+        <StepDetails step={step} />
+      </div>
+    </>
+  );
+}

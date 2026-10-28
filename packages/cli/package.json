@@ -1,0 +1,17 @@
+{
+  "name": "@uitester/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "uitester": "./bin/uitester.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts --dev",
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@uitester/core": "*",
+    "@uitester/engine": "*",
+    "@uitester/server": "*"
+  }
+}

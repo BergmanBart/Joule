@@ -32,9 +32,9 @@ function venvPython(dir: string): string {
   return IS_WIN ? join(dir, '.venv', 'Scripts', 'python.exe') : join(dir, '.venv', 'bin', 'python');
 }
 
-/** A .venv in the project folder or any parent wins over the system Python. */
+/** Configured path / $UITESTER_PYTHON, then a .venv in the project folder or any parent, then the system Python. */
 export async function findPython(projectDir: string, configured?: string): Promise<string | undefined> {
-  if (configured && existsSync(configured)) return configured;
+  for (const c of [configured, process.env.UITESTER_PYTHON]) if (c && existsSync(c)) return c;
   for (let dir = projectDir; ; dir = dirname(dir)) {
     const candidate = venvPython(dir);
     if (existsSync(candidate)) return candidate;
