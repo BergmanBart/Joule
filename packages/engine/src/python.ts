@@ -32,9 +32,9 @@ function venvPython(dir: string): string {
   return IS_WIN ? join(dir, '.venv', 'Scripts', 'python.exe') : join(dir, '.venv', 'bin', 'python');
 }
 
-/** Configured path / $UITESTER_PYTHON, then a .venv in the project folder or any parent, then the system Python. */
+/** Configured path / $JOULE_PYTHON, then a .venv in the project folder or any parent, then the system Python. */
 export async function findPython(projectDir: string, configured?: string): Promise<string | undefined> {
-  for (const c of [configured, process.env.UITESTER_PYTHON]) if (c && existsSync(c)) return c;
+  for (const c of [configured, process.env.JOULE_PYTHON]) if (c && existsSync(c)) return c;
   for (let dir = projectDir; ; dir = dirname(dir)) {
     const candidate = venvPython(dir);
     if (existsSync(candidate)) return candidate;
@@ -51,7 +51,7 @@ export interface DepsStatus {
   python?: { path: string; version: string };
   robot?: string;
   browser?: string;
-  /** `rfbrowser init` has installed the node side of the Browser library. */
+  /** The node side of the Browser library is available (BrowserBatteries, or `rfbrowser init`). */
   browserInit: boolean;
   pabot?: string;
   ok: boolean;
@@ -67,6 +67,9 @@ try:
     import Browser, importlib.metadata as m
     r["browser"] = m.version("robotframework-browser")
     r["init"] = os.path.isdir(os.path.join(os.path.dirname(Browser.__file__), "wrapper", "node_modules", "playwright-core"))
+except Exception: pass
+try:
+    import BrowserBatteries; r["init"] = True
 except Exception: pass
 try:
     import importlib.metadata as m; r["pabot"] = m.version("robotframework-pabot")
@@ -95,23 +98,26 @@ export async function checkDeps(projectDir: string, configured?: string): Promis
   };
 }
 
+// BrowserBatteries ships the Browser library's node side prebuilt, so no Node.js/npm is needed.
+const PACKAGES = ['robotframework', 'robotframework-browser', 'robotframework-browser-batteries', 'robotframework-pabot'];
+
 export function installCommands(projectDir: string, skipBrowsers: boolean): string[] {
   const py = venvPython(projectDir);
   return [
     `python -m venv "${join(projectDir, '.venv')}"`,
-    `"${py}" -m pip install --upgrade robotframework robotframework-browser robotframework-pabot`,
-    `"${py}" -m Browser.entry init${skipBrowsers ? ' --skip-browsers' : ''}`,
+    `"${py}" -m pip install --upgrade ${PACKAGES.join(' ')}`,
+    ...(skipBrowsers ? [] : [`"${py}" -m Browser.entry install`]),
   ];
 }
 
-/** Create <project>/.venv and install Robot Framework, Browser library (+ rfbrowser init) and pabot. */
+/** Create <project>/.venv and install Robot Framework, Browser library (with batteries) and pabot; Playwright browsers unless skipped. */
 export async function installDeps(projectDir: string, skipBrowsers: boolean, onLine: (l: string) => void): Promise<boolean> {
   const system = IS_WIN ? 'python' : 'python3';
   const py = venvPython(projectDir);
   const steps: [string, string[]][] = [
     [system, ['-m', 'venv', join(projectDir, '.venv')]],
-    [py, ['-m', 'pip', 'install', '--upgrade', 'robotframework', 'robotframework-browser', 'robotframework-pabot']],
-    [py, ['-m', 'Browser.entry', 'init', ...(skipBrowsers ? ['--skip-browsers'] : [])]],
+    [py, ['-m', 'pip', 'install', '--upgrade', ...PACKAGES]],
+    ...(skipBrowsers ? [] : [[py, ['-m', 'Browser.entry', 'install']] as [string, string[]]]),
   ];
   for (const [cmd, args] of steps) {
     if (cmd === system && existsSync(py)) continue;

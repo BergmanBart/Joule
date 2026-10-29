@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
-import { effectiveRunPlan, testFileName, type Environment, type Project } from '@uitester/core';
+import { effectiveRunPlan, testFileName, type Environment, type Project } from '@joule/core';
 
 export interface TestResult {
   testId?: string;
@@ -37,6 +37,9 @@ export function timestamp(d = new Date()): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+/** Printed by Pause For Key (JouleLib.py) when started by the app. */
+const PAUSE_MARKER = '[JOULE-PAUSE]';
+
 const unxml = (s: string) =>
   s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#10;/g, '\n').replace(/&amp;/g, '&');
 
@@ -48,7 +51,7 @@ export function parseOutputXml(xml: string): TestResult[] {
     const body = m[2];
     const statuses = [...body.matchAll(/<status\s+status="([A-Z ]+)"[^>]*?(?:\/>|>([\s\S]*?)<\/status>)/g)];
     const last = statuses[statuses.length - 1];
-    const doc = /<doc>UITester test ([^<]+)<\/doc>/.exec(body);
+    const doc = /<doc>Joule test ([^<]+)<\/doc>/.exec(body);
     results.push({
       testId: doc?.[1].trim(),
       name: unxml(m[1]),
@@ -89,7 +92,7 @@ export class RobotRun {
           ...(binDir ? { [pathKey]: `${binDir}${delimiter}${process.env[pathKey] ?? ''}` } : {}),
           PYTHONIOENCODING: 'utf-8',
           PYTHONUNBUFFERED: '1',
-          UITESTER_PAUSE: 'stdin',
+          JOULE_PAUSE: 'stdin',
         },
         windowsHide: true,
       });
@@ -100,11 +103,11 @@ export class RobotRun {
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          const marker = line.indexOf('[UITESTER-PAUSE]');
+          const marker = line.indexOf(PAUSE_MARKER);
           if (marker < 0) o.onLine(line);
           else {
             if (marker > 0) o.onLine(line.slice(0, marker));
-            o.onPause(line.slice(marker + 16).trim());
+            o.onPause(line.slice(marker + PAUSE_MARKER.length).trim());
           }
         }
       };

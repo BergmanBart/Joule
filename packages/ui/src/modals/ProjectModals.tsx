@@ -1,6 +1,6 @@
 import { ArrowUp, Folder, FolderOpen, FolderPlus, HardDrive, Plus, TestTube2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { FsEntry } from '@uitester/core';
+import type { FsEntry } from '@joule/core';
 import { api } from '../api';
 import { Modal } from '../components/ui';
 import { call, loadProject, openProject, toast, useStore } from '../store';
@@ -10,7 +10,7 @@ export function StartModal() {
   const hasProject = useStore((s) => !!s.project);
   const close = hasProject ? () => useStore.setState({ modal: null }) : undefined;
   return (
-    <Modal title="Welcome to UITester" onClose={close} icon={<TestTube2 size={18} color="var(--accent)" />}>
+    <Modal title="Welcome to Joule" onClose={close} icon={<TestTube2 size={18} color="var(--accent)" />}>
       <div className="modal-body start">
         <button className="big" onClick={() => useStore.setState({ modal: { kind: 'folder', purpose: 'new' } })}>
           <Plus size={22} color="var(--accent)" />
@@ -23,7 +23,7 @@ export function StartModal() {
           <FolderOpen size={22} color="var(--accent)" />
           <div>
             <div className="t">Open project</div>
-            <div className="muted">A UITester project, or any folder with Robot Framework files.</div>
+            <div className="muted">A Joule project, or any folder with Robot Framework files.</div>
           </div>
         </button>
         {settings.recent.length > 0 && (
@@ -118,7 +118,7 @@ export function FolderModal({ purpose }: { purpose: 'open' | 'new' }) {
             <div key={e.path} className={`folder${e.isProject ? ' project' : ''}`} onClick={() => setPath(e.path)} onDoubleClick={() => (e.isProject && purpose === 'open' ? choose(e.path) : void load(e.path))}>
               {listing.dir === '' ? <HardDrive size={14} /> : e.isProject ? <TestTube2 size={14} /> : <Folder size={14} color="var(--text-2)" />}
               <span>{e.name}</span>
-              {e.isProject && <span className="badge accent">UITester project</span>}
+              {e.isProject && <span className="badge accent">Joule project</span>}
             </div>
           ))}
         </div>

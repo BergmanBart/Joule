@@ -2,17 +2,17 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ENVIRONMENTS, type Environment } from '@uitester/core';
-import { isProjectDir, loadProject, saveProject } from '@uitester/core/node';
-import { checkDeps, findPython, installCommands, RobotRun } from '@uitester/engine';
-import { startServer } from '@uitester/server';
+import { ENVIRONMENTS, type Environment } from '@joule/core';
+import { isProjectDir, loadProject, saveProject } from '@joule/core/node';
+import { checkDeps, findPython, installCommands, RobotRun } from '@joule/engine';
+import { startServer } from '@joule/server';
 
-const HELP = `UITester — build and run UI tests that are saved as Robot Framework files.
+const HELP = `Joule — build and run UI tests that are saved as Robot Framework files.
 
 Usage:
-  uitester [project-dir] [--port 4321] [--no-open]
+  joule [project-dir] [--port 4321] [--no-open]
       Start the app (opens in your browser).
-  uitester run [project-dir] [--tests "Name A,Name B"] [--env TEST] [--headless] [--serial]
+  joule run [project-dir] [--tests "Name A,Name B"] [--env TEST] [--headless] [--serial]
       Run tests with Robot Framework without the UI. Exit code 0 when all pass.
 `;
 
@@ -49,7 +49,7 @@ function uiDir(): string | undefined {
 
 async function run(dir: string, flags: Record<string, string | boolean>): Promise<number> {
   if (!isProjectDir(dir)) {
-    console.error(`No UITester project (uitester.json) in ${dir}`);
+    console.error(`No Joule project (joule.json) in ${dir}`);
     return 2;
   }
   let project = await loadProject(dir);
@@ -73,7 +73,7 @@ async function run(dir: string, flags: Record<string, string | boolean>): Promis
       return 2;
     }
   }
-  project = await saveProject(dir, project); // make sure the .robot files match uitester.json
+  project = await saveProject(dir, project); // make sure the .robot files match joule.json
   const result = await new RobotRun({
     projectDir: dir,
     project,
@@ -111,7 +111,7 @@ async function main() {
     uiDir: dev ? undefined : uiDir(),
     dev: dev ? { root: fileURLToPath(new URL('../../ui', import.meta.url)) } : undefined,
   });
-  console.log(`UITester is running at ${server.url}`);
+  console.log(`Joule is running at ${server.url}`);
   if (!dev && !uiDir()) console.log('Note: the UI is not built yet. Run `npm run build` (or start with --dev).');
   if (!flags['no-open']) openBrowser(server.url);
   const stop = async () => {

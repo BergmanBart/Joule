@@ -1,5 +1,5 @@
 import { newId } from './ids';
-import type { ElementDescriptor, Keyword, Project, Step, Test } from './model';
+import type { ElementDescriptor, Keyword, Locator, Project, Step, Test } from './model';
 import { Project as ProjectSchema, Settings } from './model';
 import { defaultUse } from './selector';
 
@@ -87,6 +87,11 @@ function elementLabel(d: ElementDescriptor): string {
   return short ? `${d.tag} "${short}"` : d.tag;
 }
 
+function locatorLabel(loc: Locator): string {
+  const el = elementLabel(loc.props);
+  return loc.within ? `${el} in ${elementLabel(loc.within.parent.props)}` : el;
+}
+
 const ACTION_LABEL: Record<string, string> = {
   click: 'Click',
   dblclick: 'Double click',
@@ -104,7 +109,7 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
   if (step.name) return step.name;
   switch (step.type) {
     case 'element': {
-      const el = elementLabel(step.locator.props);
+      const el = locatorLabel(step.locator);
       if (step.mode === 'assert') {
         const a = step.assertion;
         if (!a) return `Assert ${el}`;
@@ -118,7 +123,7 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
     case 'wait':
       if (step.wait.kind === 'time') return `Wait ${step.wait.seconds}s`;
       if (step.wait.kind === 'load') return `Wait for page ${step.wait.state}`;
-      return `Wait for ${elementLabel(step.wait.locator.props)} ${step.wait.state}`;
+      return `Wait for ${locatorLabel(step.wait.locator)} ${step.wait.state}`;
     case 'pause':
       return 'Pause';
     case 'screenshot':
@@ -127,7 +132,7 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
       return 'Group';
     case 'if': {
       const a = step.condition.assertion;
-      return `If ${elementLabel(step.condition.locator.props)} ${a.property} ${a.operator} ${a.expected}`;
+      return `If ${locatorLabel(step.condition.locator)} ${a.property} ${a.operator} ${a.expected}`;
     }
     case 'keywordCall':
       return keywords.find((k) => k.id === step.keywordId)?.name ?? 'Missing keyword';

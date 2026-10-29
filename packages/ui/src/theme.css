@@ -227,3 +227,10 @@ pre.cmds { background: var(--bg); padding: 10px; border-radius: 6px; border: 1px
 @keyframes spin { to { transform: rotate(360deg); } }
 .input.invalid { border-color: var(--danger); }
 a.btn { text-decoration: none; color: inherit; }
+.collapse-toggle { display: flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; text-align: left; }
+.collapse-toggle:hover .label, .collapse-toggle:hover svg { color: var(--text); }
+.selector-preview.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+.scope { border: 1px dashed #b37feb; border-radius: var(--radius); padding: 6px 8px 8px; margin-bottom: 10px; }
+.scope .prop-list { margin-bottom: 6px; }
+.scope-head { margin-bottom: 4px; gap: 2px; }
+.scope-hint { font-size: 12px; margin-bottom: 6px; }

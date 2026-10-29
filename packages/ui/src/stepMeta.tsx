@@ -17,7 +17,7 @@ import {
   TextCursorInput,
   Pointer,
 } from 'lucide-react';
-import type { Step } from '@uitester/core';
+import type { Step } from '@joule/core';
 
 export interface StepMeta {
   icon: LucideIcon;

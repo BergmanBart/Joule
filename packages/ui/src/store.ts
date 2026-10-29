@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   cloneWithNewIds,
+  defaultHasUse,
+  defaultScopeUse,
   defaultUse,
   filterSteps,
   findStep,
@@ -17,6 +19,7 @@ import {
   updateStep,
   walk,
   type AppSettings,
+  type BaseLocator,
   type ElementDescriptor,
   type Keyword,
   type Locator,
@@ -24,7 +27,7 @@ import {
   type RobotTestResult,
   type Step,
   type Test,
-} from '@uitester/core';
+} from '@joule/core';
 import { api } from './api';
 
 export type Modal =
@@ -58,8 +61,11 @@ export interface RunState {
   testIds: string[];
 }
 
-/** Where the next recorded click goes: a new step, or the locator of an existing step. */
-export type PickTarget = { stepId: string; field: 'wait' | 'condition' | 'element' } | null;
+/** Part of a locator's "must be inside" scope: the parent, or one of the elements the parent must contain. */
+export type ScopePart = { kind: 'parent' } | { kind: 'has'; index: number };
+
+/** Where the next recorded click goes: a new step, or (part of) the locator of an existing step. */
+export type PickTarget = { stepId: string; field: 'wait' | 'condition' | 'element'; part?: ScopePart } | null;
 
 interface State {
   connected: boolean;
@@ -80,6 +86,8 @@ interface State {
   anchor?: string;
   detail?: string;
   pickTarget: PickTarget;
+  /** Search details section folded away in the details panel. */
+  searchCollapsed: boolean;
 
   view: { status: 'idle' | 'starting' | 'ready' | 'closed' | 'error'; url: string; message?: string; mode: 'record' | 'interact' };
   run: RunState;
@@ -102,11 +110,29 @@ export const useStore = create<State>(() => ({
   future: [],
   selected: [],
   pickTarget: null,
+  searchCollapsed: readFlag('joule.searchCollapsed'),
   view: { status: 'idle', url: '', mode: 'record' },
   run: emptyRun,
   outputOpen: false,
   modal: null,
 }));
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setSearchCollapsed(collapsed: boolean) {
+  set({ searchCollapsed: collapsed });
+  try {
+    localStorage.setItem('joule.searchCollapsed', collapsed ? '1' : '0');
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 const get = useStore.getState;
 const set = useStore.setState;
@@ -145,7 +171,7 @@ export function loadProject(dir: string, project: Project, extra: { externalEdit
     run: emptyRun,
     modal: null,
   });
-  document.title = `${project.name} · UITester`;
+  document.title = `${project.name} · Joule`;
   void startView();
 }
 
@@ -154,7 +180,7 @@ export async function openProject(dir: string) {
   if (!r) return;
   loadProject(r.dir, r.project, { externalEdits: r.externalEdits, warnings: r.warnings });
   if (r.imported) {
-    toast('Opened Robot files that were not created with UITester. Review the steps, then save.');
+    toast('Opened Robot files that were not created with Joule. Review the steps, then save.');
     set({ dirty: true });
   }
   set({ settings: { ...get().settings, recent: [r.dir, ...get().settings.recent.filter((d) => d !== r.dir)] } });
@@ -379,17 +405,37 @@ export function addStepOfType(type: Parameters<typeof newStep>[0], extra?: { key
   if (type === 'if') set({ pickTarget: { stepId: s.id, field: 'condition' } });
 }
 
+/** Apply `fn` to the locator in `field` of a step (unchanged when the step has no such locator). */
+export function mapLocator(s: Step, field: NonNullable<PickTarget>['field'], fn: (l: Locator) => Locator): Step {
+  if (field === 'element' && s.type === 'element') return { ...s, locator: fn(s.locator) };
+  if (field === 'wait' && s.type === 'wait' && s.wait.kind === 'element') return { ...s, wait: { ...s.wait, locator: fn(s.wait.locator) } };
+  if (field === 'condition' && s.type === 'if') return { ...s, condition: { ...s.condition, locator: fn(s.condition.locator) } };
+  return s;
+}
+
+function setScopePart(l: Locator, part: ScopePart, picked: BaseLocator): Locator {
+  if (part.kind === 'parent') return { ...l, within: { parent: picked, has: l.within?.has ?? [] } };
+  if (!l.within) return l;
+  const has = [...l.within.has];
+  has[part.index] = picked;
+  return { ...l, within: { ...l.within, has } };
+}
+
 export function onPick(descriptor: ElementDescriptor) {
   const { pickTarget, project, current } = get();
   if (!project || !current) return;
   if (pickTarget) {
-    const loc: Locator = { props: descriptor, use: defaultUse(descriptor) };
+    const loc: BaseLocator = { props: descriptor, use: defaultUse(descriptor) };
+    const { field, part } = pickTarget;
     editSteps((steps) =>
       updateStep(steps, pickTarget.stepId, (s) => {
-        if (pickTarget.field === 'condition' && s.type === 'if') return { ...s, condition: { ...s.condition, locator: loc } };
-        if (pickTarget.field === 'wait' && s.type === 'wait') return { ...s, wait: { kind: 'element', locator: loc, state: 'visible' } };
-        if (pickTarget.field === 'element' && s.type === 'element') return { ...s, locator: loc };
-        return s;
+        if (!part && field === 'wait' && s.type === 'wait' && s.wait.kind !== 'element') return { ...s, wait: { kind: 'element', locator: loc, state: 'visible' } };
+        if (part) {
+          const use = part.kind === 'parent' ? defaultScopeUse(descriptor) : defaultHasUse(descriptor);
+          return mapLocator(s, field, (l) => setScopePart(l, part, { props: descriptor, use }));
+        }
+        // re-picking the element keeps its "must be inside" scope
+        return mapLocator(s, field, (l) => ({ ...loc, within: l.within }));
       }),
     );
     set({ pickTarget: null });
@@ -508,7 +554,7 @@ export function moveSelected(ids: string[], target: string, index: number) {
 
 // ---------- clipboard ----------
 
-const CLIP_KEY = 'uitester/steps';
+const CLIP_KEY = 'joule/steps';
 let memoryClipboard = '';
 
 export async function copySelected() {

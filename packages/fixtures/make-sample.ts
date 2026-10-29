@@ -1,7 +1,7 @@
-/** Create a sample UITester project for the fixture site. Usage: tsx make-sample.ts <dir> [port] */
+/** Create a sample Joule project for the fixture site. Usage: tsx make-sample.ts <dir> [port] */
 import { resolve } from 'node:path';
-import { newProject, Project, type ElementDescriptor, type Step } from '@uitester/core';
-import { saveProject } from '@uitester/core/node';
+import { newProject, Project, type ElementDescriptor, type Step } from '@joule/core';
+import { saveProject } from '@joule/core/node';
 
 const dir = resolve(process.argv[2] ?? 'sample-project');
 const port = Number(process.argv[3] ?? 4400);

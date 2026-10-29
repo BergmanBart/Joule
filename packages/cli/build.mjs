@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const ui = here('../ui/dist');
-if (!existsSync(`${ui}/index.html`)) throw new Error('Build the UI first: npm run build -w @uitester/ui');
+if (!existsSync(`${ui}/index.html`)) throw new Error('Build the UI first: npm run build -w @joule/ui');
 
 rmSync(here('dist'), { recursive: true, force: true });
 await build({

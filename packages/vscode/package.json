@@ -1,22 +1,22 @@
 {
-  "name": "uitester-vscode",
-  "displayName": "UITester",
+  "name": "joule-vscode",
+  "displayName": "Joule",
   "description": "Build, maintain and run UI tests visually; saved as Robot Framework files.",
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
   "engines": { "vscode": "^1.85.0" },
   "main": "./dist/extension.js",
-  "activationEvents": ["workspaceContains:uitester.json"],
+  "activationEvents": ["workspaceContains:joule.json"],
   "contributes": {
-    "commands": [{ "command": "uitester.open", "title": "UITester: Open" }]
+    "commands": [{ "command": "joule.open", "title": "Joule: Open" }]
   },
   "scripts": {
     "build": "node build.mjs"
   },
   "devDependencies": {
     "@types/vscode": "1.85.0",
-    "@uitester/server": "*"
+    "@joule/server": "*"
   },
   "dependencies": {
     "playwright-core": "1.48.2"

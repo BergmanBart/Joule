@@ -1,7 +1,7 @@
 """Parse .robot/.resource files with Robot Framework's own parser and print a JSON summary.
 
 Usage: python parse_robot.py <folder>
-Used by UITester to open projects it did not create (or that were edited by hand).
+Used by Joule to open projects it did not create (or that were edited by hand).
 """
 import ast
 import json

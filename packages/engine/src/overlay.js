@@ -1,19 +1,20 @@
 // Injected into every page of the browser view (plain JS: it is serialized as text).
 // Draws step outlines + order badges and, in record mode, turns clicks into element picks.
 (() => {
-  if (window.__uitester) return;
+  if (window.__joule) return;
 
-  const state = { mode: 'interact', items: [], hover: null };
+  // constraint: while picking a scope, only ancestors / descendants of the anchor elements can be picked.
+  const state = { mode: 'interact', items: [], hover: null, constraint: null };
   let host = null;
   let root = null;
   let pool = [];
   let frame = 0;
 
-  const COLORS = { normal: '#ff4d4f', selected: '#ff4d4f', dim: '#ff4d4f', extra: '#faad14', running: '#36cfc9', hover: '#4096ff' };
+  const COLORS = { normal: '#ff4d4f', selected: '#ff4d4f', dim: '#ff4d4f', extra: '#faad14', running: '#36cfc9', hover: '#4096ff', anchor: '#b37feb' };
 
   function ensureHost() {
     if (host && host.isConnected) return;
-    host = document.createElement('uitester-overlay');
+    host = document.createElement('joule-overlay');
     host.setAttribute('aria-hidden', 'true');
     host.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
     root = host.attachShadow({ mode: 'closed' });
@@ -44,6 +45,7 @@
     for (const item of state.items) {
       item.els.forEach((el, idx) => boxes.push({ el, n: idx === 0 ? item.n : null, kind: idx === 0 ? item.kind : 'extra' }));
     }
+    if (state.constraint) for (const el of state.constraint.els) boxes.push({ el, n: null, kind: 'anchor' });
     if (state.mode === 'record' && state.hover) boxes.push({ el: state.hover, n: null, kind: 'hover' });
     let used = 0;
     for (const b of boxes) {
@@ -58,7 +60,7 @@
       d.style.top = r.top - width + 'px';
       d.style.width = r.width + width * 2 + 'px';
       d.style.height = r.height + width * 2 + 'px';
-      d.style.border = `${width}px ${b.kind === 'extra' || b.kind === 'hover' ? 'dashed' : 'solid'} ${color}`;
+      d.style.border = `${width}px ${b.kind === 'extra' || b.kind === 'hover' || b.kind === 'anchor' ? 'dashed' : 'solid'} ${color}`;
       d.style.opacity = b.kind === 'dim' ? '0.3' : '1';
       d.style.background = b.kind === 'selected' ? 'rgba(255,77,79,0.08)' : 'transparent';
       const badge = d.firstChild;
@@ -139,6 +141,17 @@
 
   function pickTarget(t) {
     if (!(t instanceof Element) || t === host) return null;
+    const c = state.constraint;
+    if (c && c.relation === 'ancestor') {
+      // the smallest ancestor of an anchor under the cursor
+      for (let n = t; n; n = n.parentElement) if (c.els.some((el) => n !== el && n.contains(el))) return n;
+      return null;
+    }
+    if (c && c.relation === 'descendant') {
+      const inside = (n) => n && c.els.some((el) => n !== el && el.contains(n));
+      const el = t.closest(INTERACTIVE);
+      return inside(el) ? el : inside(t) ? t : null;
+    }
     return t.closest(INTERACTIVE) || t;
   }
 
@@ -159,7 +172,7 @@
       if (state.mode !== 'record') return;
       block(e);
       const el = pickTarget(e.target);
-      if (el && window.__uitesterPick) window.__uitesterPick(describe(el));
+      if (el && window.__joulePick) window.__joulePick(describe(el));
     },
     true,
   );
@@ -182,7 +195,7 @@
   function onMutations(records) {
     if (records.every((r) => host && (r.target === host || host.contains(r.target)))) return;
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => window.__uitesterChanged && window.__uitesterChanged(), 400);
+    changeTimer = setTimeout(() => window.__jouleChanged && window.__jouleChanged(), 400);
   }
   function observe() {
     new MutationObserver(onMutations).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -190,7 +203,7 @@
   if (document.documentElement) observe();
   else document.addEventListener('DOMContentLoaded', observe);
 
-  window.__uitester = {
+  window.__joule = {
     setMode(mode) {
       state.mode = mode;
       if (mode !== 'record') state.hover = null;
@@ -200,10 +213,15 @@
       state.items = items;
       schedule();
     },
+    setConstraint(els, relation) {
+      state.constraint = els && els.length ? { els, relation } : null;
+      state.hover = null;
+      schedule();
+    },
     describe,
   };
 
-  if (window.__uitesterHello) {
-    window.__uitesterHello().then((s) => s && window.__uitester.setMode(s.mode));
+  if (window.__jouleHello) {
+    window.__jouleHello().then((s) => s && window.__joule.setMode(s.mode));
   }
 })();

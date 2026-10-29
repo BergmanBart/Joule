@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { chromium, firefox, type Browser, type BrowserContext, type CDPSession, type ElementHandle, type Page } from 'playwright-core';
-import type { BrowserName, ElementDescriptor } from '@uitester/core';
+import type { BrowserName, ElementDescriptor } from '@joule/core';
 
 const OVERLAY = readFileSync(new URL('./overlay.js', import.meta.url), 'utf8');
 
@@ -84,11 +84,11 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     this.options = options;
     this.browser = await launchBrowser(options.browser, true);
     this.context = await this.browser.newContext({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1 });
-    await this.context.exposeBinding('__uitesterPick', (_src, d: ElementDescriptor) => {
+    await this.context.exposeBinding('__joulePick', (_src, d: ElementDescriptor) => {
       this.emit('pick', d);
     });
-    await this.context.exposeBinding('__uitesterChanged', () => this.refresh());
-    await this.context.exposeBinding('__uitesterHello', () => ({ mode: this.mode }));
+    await this.context.exposeBinding('__jouleChanged', () => this.refresh());
+    await this.context.exposeBinding('__jouleHello', () => ({ mode: this.mode }));
     await this.context.addInitScript(OVERLAY);
     this.context.on('page', (p) => void this.attach(p));
     await this.attach(await this.context.newPage());
@@ -154,9 +154,17 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
 
   async navigate(url: string): Promise<void> {
     if (!this.page) return;
-    await this.page.goto(url, { waitUntil: 'domcontentloaded' }).catch((e: Error) => {
-      // Show the error page instead of throwing (bad URL, site down, ...)
-      return this.page?.setContent(`<pre style="font:14px monospace;padding:24px;color:#b00">${escapeHtml(e.message)}</pre>`);
+    await this.page.goto(url, { waitUntil: 'domcontentloaded' }).catch(async (e: Error) => {
+      // Show the error page instead of throwing (bad URL, site down, ...). The browser may still be committing
+      // its own error page, which destroys content set too early, so retry briefly.
+      const html = `<pre style="font:14px monospace;padding:24px;color:#b00">${escapeHtml(e.message)}</pre>`;
+      for (let i = 0; i < 5; i++) {
+        try {
+          return await this.page?.setContent(html);
+        } catch {
+          await this.page?.waitForTimeout(200).catch(() => {});
+        }
+      }
     });
   }
 
@@ -170,7 +178,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
 
   async setMode(mode: ViewMode): Promise<void> {
     this.mode = mode;
-    await this.page?.evaluate((m) => (window as any).__uitester?.setMode(m), mode).catch(() => {});
+    await this.page?.evaluate((m) => (window as any).__joule?.setMode(m), mode).catch(() => {});
   }
 
   getMode(): ViewMode {
@@ -212,6 +220,35 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     }
   }
 
+  /** Limit record-mode picks to ancestors / descendants of the matches of `selector`; null lifts the limit. */
+  async setPickConstraint(c: { selector: string; relation: 'ancestor' | 'descendant' } | null): Promise<{ found: boolean }> {
+    const page = this.page;
+    if (!page) return { found: false };
+    let handles: ElementHandle[] = [];
+    try {
+      if (c) handles = (await page.locator(c.selector).elementHandles()).slice(0, 50);
+      await page.evaluate(([els, relation]) => (window as any).__joule?.setConstraint(els, relation), [handles, c?.relation] as const);
+      return { found: !c || handles.length > 0 };
+    } catch {
+      return { found: false };
+    } finally {
+      await Promise.all(handles.map((h) => h.dispose().catch(() => {})));
+    }
+  }
+
+  /** Describe the parent element of the first match of `selector` (to widen a scope by one level). */
+  async describeParent(selector: string): Promise<ElementDescriptor | undefined> {
+    if (!this.page) return undefined;
+    try {
+      return await this.page
+        .locator(selector)
+        .first()
+        .evaluate((el) => (el.parentElement && el.parentElement !== document.documentElement ? (window as any).__joule?.describe(el.parentElement) : undefined), undefined, { timeout: 1000 });
+    } catch {
+      return undefined;
+    }
+  }
+
   async setHighlights(items: HighlightItem[]): Promise<void> {
     this.items = items;
     await this.refresh();
@@ -240,7 +277,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
         handles.push(...els);
         resolved.push({ n: item.n, kind: item.kind, els });
       }
-      await page.evaluate((items) => (window as any).__uitester?.setItems(items), resolved);
+      await page.evaluate((items) => (window as any).__joule?.setItems(items), resolved);
     } catch {
       /* navigation in progress; the load event will refresh again */
     } finally {

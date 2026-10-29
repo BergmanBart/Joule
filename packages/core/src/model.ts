@@ -45,10 +45,22 @@ export type ElementDescriptor = z.infer<typeof ElementDescriptor>;
  * Keys: 'tag' | 'id' | 'text' | 'xpath' | 'css' | 'class:<name>' | 'attr:<name>'
  * A `custom` selector, when set, wins over everything else.
  */
-export const Locator = z.object({
+export const BaseLocator = z.object({
   props: ElementDescriptor,
   use: z.array(z.string()).default([]),
   custom: z.string().optional(),
+});
+export type BaseLocator = z.infer<typeof BaseLocator>;
+
+/** Only match inside `parent`; the parent must also contain every `has` element. */
+export const Scope = z.object({
+  parent: BaseLocator,
+  has: z.array(BaseLocator).default([]),
+});
+export type Scope = z.infer<typeof Scope>;
+
+export const Locator = BaseLocator.extend({
+  within: Scope.optional(),
 });
 export type Locator = z.infer<typeof Locator>;
 

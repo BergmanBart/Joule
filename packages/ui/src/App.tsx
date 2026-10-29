@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { ENVIRONMENTS, type Environment } from '@uitester/core';
+import { ENVIRONMENTS, type Environment } from '@joule/core';
 import { api } from './api';
 import { Menu, MenuItem, Resizer } from './components/ui';
 import { FolderModal, NewProjectModal, StartModal } from './modals/ProjectModals';
@@ -111,7 +111,7 @@ function TopBar() {
       <div className="brand">
         <TestTube2 size={18} color="var(--accent)" />
         <span className="project-name" title={projectDir}>
-          {project?.name ?? 'UITester'}
+          {project?.name ?? 'Joule'}
         </span>
       </div>
       {project && (
@@ -238,7 +238,7 @@ function ExternalEditsBanner() {
     <div className="notice warn" style={{ margin: 0, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
       <AlertTriangle size={14} />
       <span className="grow">
-        {edits.join(', ')} {edits.length > 1 ? 'were' : 'was'} changed outside UITester. Saving now would overwrite those changes.
+        {edits.join(', ')} {edits.length > 1 ? 'were' : 'was'} changed outside Joule. Saving now would overwrite those changes.
       </span>
       <button
         className="btn small"
@@ -254,7 +254,7 @@ function ExternalEditsBanner() {
         Load the changes
       </button>
       <button className="btn small ghost" onClick={() => useStore.setState({ externalEdits: [] })}>
-        Keep UITester version
+        Keep Joule version
       </button>
     </div>
   );

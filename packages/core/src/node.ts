@@ -6,23 +6,26 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { Project } from './model';
 import { generateRobotFiles } from './robot/generate';
 
-export const PROJECT_FILE = 'uitester.json';
+export const PROJECT_FILE = 'joule.json';
+/** Projects made before the rename to Joule. Read as-is; the next save writes joule.json and cleans up. */
+const LEGACY_PROJECT_FILE = 'uitester.json';
 
 export function sha256(text: string): string {
   return createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
 }
 
 export function isProjectDir(dir: string): boolean {
-  return existsSync(join(dir, PROJECT_FILE));
+  return existsSync(join(dir, PROJECT_FILE)) || existsSync(join(dir, LEGACY_PROJECT_FILE));
 }
 
 export async function loadProject(dir: string): Promise<Project> {
-  const raw = JSON.parse(await readFile(join(dir, PROJECT_FILE), 'utf8'));
+  const file = existsSync(join(dir, PROJECT_FILE)) ? PROJECT_FILE : LEGACY_PROJECT_FILE;
+  const raw = JSON.parse(await readFile(join(dir, file), 'utf8'));
   return Project.parse(raw);
 }
 
 /**
- * Write uitester.json and all generated Robot Framework files.
+ * Write joule.json and all generated Robot Framework files.
  * Generated files from a previous save that are no longer produced (e.g. a deleted test) are removed,
  * but only when nobody edited them since.
  */
@@ -44,10 +47,12 @@ export async function saveProject(dir: string, project: Project): Promise<Projec
   const shots = saved.settings.screenshotDir;
   await mkdir(isAbsolute(shots) ? shots : join(dir, shots), { recursive: true });
   await writeFile(join(dir, PROJECT_FILE), JSON.stringify(saved, null, 2) + '\n', 'utf8');
+  // Old generated helpers (uitester.resource, UITesterLib.py) went with the stale-file cleanup above.
+  await rm(join(dir, LEGACY_PROJECT_FILE), { force: true });
   return saved;
 }
 
-/** Generated files changed outside UITester since the last save. */
+/** Generated files changed outside Joule since the last save. */
 export async function externallyEdited(dir: string, project: Project): Promise<string[]> {
   const changed: string[] = [];
   for (const [rel, hash] of Object.entries(project.generatedHashes)) {

@@ -1,5 +1,5 @@
 {
-  "name": "@uitester/fixtures",
+  "name": "@joule/fixtures",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,11 +1,11 @@
 {
-  "name": "@uitester/server",
+  "name": "@joule/server",
   "version": "0.1.0",
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@uitester/core": "*",
-    "@uitester/engine": "*",
+    "@joule/core": "*",
+    "@joule/engine": "*",
     "ws": "8.18.0"
   },
   "devDependencies": {

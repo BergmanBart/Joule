@@ -1,8 +1,10 @@
-import { AlertTriangle, CheckCircle2, Crosshair, ExternalLink, Link2Off, Puzzle, Ungroup, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpFromLine, CheckCircle2, ChevronDown, ChevronRight, Crosshair, ExternalLink, Link2Off, Plus, Puzzle, SquareDashed, Ungroup, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   availableProps,
+  baseSelector,
   buildSelector,
+  defaultScopeUse,
   describeStep,
   findStep,
   interpolate,
@@ -10,16 +12,32 @@ import {
   isSelect,
   isTextInput,
   OPERATORS,
+  scopeSelector,
   type ActionKind,
   type Assertion,
+  type BaseLocator,
   type ElementDescriptor,
   type Locator,
+  type Scope,
   type Step,
-} from '@uitester/core';
+} from '@joule/core';
 import { api } from '../api';
 import { NumberField, TextField } from '../components/ui';
 import { stepMeta, TypeIcon } from '../stepMeta';
-import { clearSelection, containerSteps, makeReusable, selectContainer, ungroup, unlinkKeyword, updateCurrentStep, useStore } from '../store';
+import {
+  clearSelection,
+  containerSteps,
+  makeReusable,
+  selectContainer,
+  setSearchCollapsed,
+  toast,
+  ungroup,
+  unlinkKeyword,
+  updateCurrentStep,
+  useStore,
+  type PickTarget,
+  type ScopePart,
+} from '../store';
 import { useParams } from './BrowserPanel';
 
 type Upd = (fn: (s: Step) => Step) => void;
@@ -121,10 +139,9 @@ function MatchCount({ selector }: { selector: string }) {
   );
 }
 
-function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Locator; onChange: (l: Locator) => void; pickField: 'element' | 'wait' | 'condition'; stepId: string }) {
-  const params = useParams();
-  const props = availableProps(locator.props);
-  const selector = buildSelector(locator);
+/** Checkboxes for the properties used to find one element. */
+function PropToggles<L extends BaseLocator>({ locator, onChange, exclude = [] }: { locator: L; onChange: (l: L) => void; exclude?: string[] }) {
+  const props = availableProps(locator.props).filter((p) => !exclude.includes(p.key));
   const use = new Set(locator.use);
   const toggle = (key: string) => {
     const next = new Set(use);
@@ -140,11 +157,119 @@ function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Loca
     }
     onChange({ ...locator, use: props.map((p) => p.key).filter((k) => next.has(k)), custom: undefined });
   };
-  const picking = useStore((s) => s.pickTarget?.stepId === stepId);
+  return (
+    <div className="prop-list">
+      {props.map((p) => (
+        <label key={p.key} className="prop">
+          <input type="checkbox" checked={use.has(p.key)} onChange={() => toggle(p.key)} style={{ accentColor: 'var(--accent)' }} />
+          <span className="k">{p.label}</span>
+          <span className="v" title={p.value}>
+            {p.value}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+type PickField = NonNullable<PickTarget>['field'];
+
+function samePart(a?: ScopePart, b?: ScopePart): boolean {
+  if (a?.kind === 'has' && b?.kind === 'has') return a.index === b.index;
+  return a?.kind === b?.kind;
+}
+
+/** "Must be inside": a parent the element must be in, and elements that parent must also contain. */
+function ScopeEditor({ locator, onChange, pickField, stepId }: { locator: Locator; onChange: (l: Locator) => void; pickField: PickField; stepId: string }) {
+  const params = useParams();
+  const pickTarget = useStore((s) => s.pickTarget);
+  const picking = (part: ScopePart) => pickTarget?.stepId === stepId && pickTarget.field === pickField && samePart(pickTarget.part, part);
+  const pick = (part: ScopePart) => useStore.setState({ pickTarget: picking(part) ? null : { stepId, field: pickField, part } });
+  const within = locator.within;
+  const parentPart: ScopePart = { kind: 'parent' };
+
+  if (!within)
+    return (
+      <div className="row" style={{ marginBottom: 10 }}>
+        <button
+          className={`btn small${picking(parentPart) ? ' primary' : ''}`}
+          title="Pick a parent (e.g. a row or card) in the browser view that the element must be inside"
+          onClick={() => pick(parentPart)}
+        >
+          <SquareDashed size={12} /> {picking(parentPart) ? 'Click a parent in browser…' : 'Must be inside…'}
+        </button>
+      </div>
+    );
+
+  const setWithin = (w: Scope | undefined) => onChange({ ...locator, within: w });
+  const setHas = (has: BaseLocator[]) => setWithin({ ...within, has });
+  const upOneLevel = async () => {
+    // the parent of the scope that actually holds the element
+    const selector = `${scopeSelector(within)} >> internal:has=${JSON.stringify(baseSelector(locator))}`;
+    const r = await api.request('view.describeParent', { selector: interpolate(selector, params) }).catch(() => null);
+    if (!r?.descriptor) return toast('No wider parent found on the current page', 'error');
+    setWithin({ ...within, parent: { props: r.descriptor, use: defaultScopeUse(r.descriptor) } });
+  };
+  const nextHas: ScopePart = { kind: 'has', index: within.has.length };
+
+  return (
+    <div className="scope">
+      <div className="row scope-head">
+        <span className="label grow">Must be inside</span>
+        <button className="icon-btn small" title="Up one level: use the parent of this parent" onClick={upOneLevel}>
+          <ArrowUpFromLine size={13} />
+        </button>
+        <button className={`icon-btn small${picking(parentPart) ? ' active' : ''}`} title="Pick the parent again in the browser view" onClick={() => pick(parentPart)}>
+          <Crosshair size={13} />
+        </button>
+        <button className="icon-btn small" title="Remove: no longer require a parent" onClick={() => setWithin(undefined)}>
+          <X size={13} />
+        </button>
+      </div>
+      {picking(parentPart) && <div className="muted scope-hint">Click a parent of the element in the browser view.</div>}
+      <PropToggles locator={within.parent} onChange={(parent) => setWithin({ ...within, parent })} />
+      {within.has.map((h, i) => {
+        const part: ScopePart = { kind: 'has', index: i };
+        return (
+          <div key={i}>
+            <div className="row scope-head">
+              <span className="label grow">{i === 0 ? 'Parent also contains' : 'And contains'}</span>
+              <button className={`icon-btn small${picking(part) ? ' active' : ''}`} title="Pick this element again inside the parent" onClick={() => pick(part)}>
+                <Crosshair size={13} />
+              </button>
+              <button className="icon-btn small" title="Remove this condition" onClick={() => setHas(within.has.filter((_, j) => j !== i))}>
+                <X size={13} />
+              </button>
+            </div>
+            {picking(part) && <div className="muted scope-hint">Click an element inside the parent in the browser view.</div>}
+            {/* absolute paths don't work inside :has() */}
+            <PropToggles locator={h} onChange={(next) => setHas(within.has.map((x, j) => (j === i ? next : x)))} exclude={['xpath', 'css']} />
+          </div>
+        );
+      })}
+      <button
+        className={`btn small${picking(nextHas) ? ' primary' : ' ghost'}`}
+        title="Pick an element inside the parent that must also exist, e.g. the name in a table row"
+        onClick={() => pick(nextHas)}
+      >
+        <Plus size={12} /> {picking(nextHas) ? 'Click inside the parent…' : 'Parent also contains…'}
+      </button>
+    </div>
+  );
+}
+
+function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Locator; onChange: (l: Locator) => void; pickField: PickField; stepId: string }) {
+  const params = useParams();
+  const selector = buildSelector(locator);
+  const collapsed = useStore((s) => s.searchCollapsed);
+  const picking = useStore((s) => s.pickTarget?.stepId === stepId && !s.pickTarget.part);
   return (
     <div className="section">
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="label grow">Search details</span>
+        <button className="collapse-toggle grow" aria-expanded={!collapsed} onClick={() => setSearchCollapsed(!collapsed)}>
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          <span className="label">Search details</span>
+        </button>
         <button
           className={`btn small${picking ? ' primary' : ''}`}
           title="Pick the element again in the browser view"
@@ -153,41 +278,44 @@ function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Loca
           <Crosshair size={12} /> {picking ? 'Click in browser…' : 'Pick element'}
         </button>
       </div>
-      {!locator.custom && (
-        <div className="prop-list">
-          {props.map((p) => (
-            <label key={p.key} className="prop">
-              <input type="checkbox" checked={use.has(p.key)} onChange={() => toggle(p.key)} style={{ accentColor: 'var(--accent)' }} />
-              <span className="k">{p.label}</span>
-              <span className="v" title={p.value}>
-                {p.value}
-              </span>
-            </label>
-          ))}
+      {collapsed ? (
+        <div className="selector-preview one-line" title={selector}>
+          {selector}
         </div>
-      )}
-      <div className="field">
-        <label>{locator.custom ? 'Custom selector' : 'Selector'}</label>
-        {locator.custom !== undefined ? (
-          <TextField value={locator.custom} onCommit={(v) => onChange({ ...locator, custom: v || undefined })} mono placeholder="css=… / xpath=… / text=…" />
-        ) : (
-          <div className="selector-preview">{selector}</div>
-        )}
-        <div className="row">
-          {locator.custom === undefined ? (
-            <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: selector })}>
-              Edit as custom selector
-            </button>
-          ) : (
-            locator.props.tag !== '*' && (
-              <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: undefined })}>
-                Back to property selection
-              </button>
-            )
+      ) : (
+        <>
+          {!locator.custom && <PropToggles locator={locator} onChange={onChange} />}
+          <ScopeEditor locator={locator} onChange={onChange} pickField={pickField} stepId={stepId} />
+          {locator.within && !locator.custom && locator.use.includes('xpath') && (
+            <div className="notice warn">
+              <AlertTriangle size={14} /> Inside a parent an xpath is searched relative to that parent. Use tag, class or text instead.
+            </div>
           )}
-        </div>
-      </div>
-      <MatchCount selector={interpolate(selector, params)} />
+          <div className="field">
+            <label>{locator.custom ? 'Custom selector' : 'Selector'}</label>
+            {locator.custom !== undefined ? (
+              <TextField value={locator.custom} onCommit={(v) => onChange({ ...locator, custom: v || undefined })} mono placeholder="css=… / xpath=… / text=…" />
+            ) : (
+              <div className="selector-preview">{selector}</div>
+            )}
+            {locator.custom !== undefined && locator.within && <div className="selector-preview">{selector}</div>}
+            <div className="row">
+              {locator.custom === undefined ? (
+                <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: baseSelector(locator) })}>
+                  Edit as custom selector
+                </button>
+              ) : (
+                locator.props.tag !== '*' && (
+                  <button className="btn small ghost" onClick={() => onChange({ ...locator, custom: undefined })}>
+                    Back to property selection
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+          <MatchCount selector={interpolate(selector, params)} />
+        </>
+      )}
     </div>
   );
 }

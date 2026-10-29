@@ -1,8 +1,8 @@
 import { ArrowLeft, Circle, Crosshair, Globe, Hand, Home, Loader2, Play, RotateCw, X } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
-import { buildSelector, interpolate, numberSteps, resolveParameters, walk, type HighlightRequest, type Locator, type Step } from '@uitester/core';
+import { buildSelector, findStep, interpolate, numberSteps, resolveParameters, scopeSelector, walk, type HighlightRequest, type Locator, type Step } from '@joule/core';
 import { api } from '../api';
-import { containerSteps, currentTest, effectiveSelection, startUrl, startView, useStore } from '../store';
+import { containerSteps, currentTest, effectiveSelection, startUrl, startView, toast, useStore, type PickTarget } from '../store';
 
 /** Locator a step points at in the page (element, element-wait or if-condition). */
 export function stepLocator(s: Step): Locator | undefined {
@@ -50,6 +50,38 @@ function useHighlightSync() {
   }, [project, current, selected, detail, runSteps, running, status, params]);
 }
 
+/** While picking part of a "must be inside" scope, only let the overlay pick ancestors (parent) or descendants (contains). */
+function usePickConstraint() {
+  const pickTarget = useStore((s) => s.pickTarget);
+  const status = useStore((s) => s.view.status);
+  const params = useParams();
+  useEffect(() => {
+    const part = pickTarget?.part;
+    if (!pickTarget || !part || status !== 'ready') return;
+    const { project, current } = useStore.getState();
+    const step = findStep(containerSteps(project, current), pickTarget.stepId);
+    const loc = step && stepLocator(step);
+    const anchor = !loc ? undefined : part.kind === 'parent' ? buildSelector(loc) : loc.within && scopeSelector(loc.within);
+    if (!anchor) return;
+    const relation = part.kind === 'parent' ? 'ancestor' : 'descendant';
+    void api
+      .request('view.pickConstraint', { constraint: { selector: interpolate(anchor, params), relation } })
+      .then(({ found }) => {
+        if (found || useStore.getState().pickTarget !== pickTarget) return;
+        toast(part.kind === 'parent' ? 'The element is not on the current page' : 'The parent is not on the current page', 'error');
+        useStore.setState({ pickTarget: null });
+      })
+      .catch(() => {});
+    return () => void api.request('view.pickConstraint', { constraint: null }).catch(() => {});
+  }, [pickTarget, status]);
+}
+
+function pickBanner(t: NonNullable<PickTarget>): string {
+  if (t.part?.kind === 'parent') return 'Click a parent of the element (outlined in purple)';
+  if (t.part?.kind === 'has') return 'Click an element inside the parent (outlined in purple)';
+  return 'Click the element for this step';
+}
+
 const BUTTONS = ['left', 'middle', 'right'] as const;
 
 export function BrowserPanel() {
@@ -60,6 +92,7 @@ export function BrowserPanel() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const lastMove = useRef(0);
   useHighlightSync();
+  usePickConstraint();
 
   useEffect(() => {
     const img = new Image();
@@ -136,7 +169,7 @@ export function BrowserPanel() {
       <div className={`viewport${recording ? ' record' : ''}`}>
         {pickTarget && (
           <div className="pick-banner">
-            <Crosshair size={14} /> Click the element for this step
+            <Crosshair size={14} /> {pickBanner(pickTarget)}
             <button className="icon-btn small" style={{ color: '#1a1a1a' }} onClick={() => useStore.setState({ pickTarget: null })}>
               <X size={13} />
             </button>

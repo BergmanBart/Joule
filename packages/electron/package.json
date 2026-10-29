@@ -1,16 +1,19 @@
 {
-  "name": "uitester-desktop",
+  "name": "joule-desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
     "build": "node build.mjs",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron .",
+    "package": "node build.mjs && node package.mjs"
   },
   "devDependencies": {
-    "@uitester/server": "*",
-    "electron": "33.2.0"
+    "@joule/server": "*",
+    "electron": "33.2.0",
+    "electron-builder": "26.0.12",
+    "rcedit": "4.0.1"
   },
   "dependencies": {
     "playwright-core": "1.48.2"

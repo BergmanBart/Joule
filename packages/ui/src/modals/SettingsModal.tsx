@@ -1,6 +1,6 @@
 import { ArrowDown, CheckCircle2, Download, Loader2, RefreshCw, Settings, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { BROWSERS, effectiveRunPlan, ENVIRONMENTS, type DepsInfo, type Settings as ProjectSettings } from '@uitester/core';
+import { BROWSERS, effectiveRunPlan, ENVIRONMENTS, type DepsInfo, type Settings as ProjectSettings } from '@joule/core';
 import { api } from '../api';
 import { Modal, NumberField, TextField } from '../components/ui';
 import { call, edit, save, startView, useStore } from '../store';
@@ -134,7 +134,7 @@ function RunPlan() {
               onDragLeave={() => setOver(null)}
               onDrop={(e) => {
                 setOver(null);
-                const id = e.dataTransfer.getData('text/uitester-test');
+                const id = e.dataTransfer.getData('text/joule-test');
                 if (id) moveTo(id, i);
               }}
             >
@@ -145,7 +145,7 @@ function RunPlan() {
               </div>
               <div className="lane-chips">
                 {stage.map((id) => (
-                  <span key={id} className="chip" draggable onDragStart={(e) => e.dataTransfer.setData('text/uitester-test', id)}>
+                  <span key={id} className="chip" draggable onDragStart={(e) => e.dataTransfer.setData('text/joule-test', id)}>
                     {name(id)}
                   </span>
                 ))}
@@ -197,7 +197,7 @@ function Deps() {
       <Row ok={!!deps.python} label="Python 3" value={deps.python ? `${deps.python.version} (${deps.python.path})` : undefined} />
       <Row ok={!!deps.robot} label="Robot Framework" value={deps.robot} />
       <Row ok={!!deps.browser} label="Browser library" value={deps.browser} />
-      <Row ok={deps.browserInit} label="rfbrowser init" value={deps.browserInit ? 'done' : undefined} />
+      <Row ok={deps.browserInit} label="Browser runtime" value={deps.browserInit ? 'ready' : undefined} />
       <Row ok={!!deps.pabot} label="pabot (parallel runs)" value={deps.pabot ?? 'optional'} />
       {!deps.ok && (
         <>
@@ -295,7 +295,7 @@ export function AppSettingsModal() {
             </div>
           ))}
         </div>
-        <p className="muted">Settings are stored in ~/.uitester/settings.json. Project settings live in uitester.json inside each project folder.</p>
+        <p className="muted">Settings are stored in ~/.joule/settings.json. Project settings live in joule.json inside each project folder.</p>
       </div>
     </Modal>
   );

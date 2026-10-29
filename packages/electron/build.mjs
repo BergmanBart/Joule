@@ -18,3 +18,4 @@ await build({
 cpSync(here('../engine/src/overlay.js'), here('dist/overlay.js'));
 cpSync(here('../engine/src/parse_robot.py'), here('dist/parse_robot.py'));
 cpSync(here('../ui/dist'), here('dist/ui'), { recursive: true });
+cpSync(here('build/icon.png'), here('dist/icon.png'));

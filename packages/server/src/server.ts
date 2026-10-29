@@ -17,8 +17,8 @@ import {
   type Project,
   type Requests,
   type RequestType,
-} from '@uitester/core';
-import { externallyEdited, isProjectDir, loadProject, saveProject } from '@uitester/core/node';
+} from '@joule/core';
+import { externallyEdited, isProjectDir, loadProject, saveProject } from '@joule/core/node';
 import {
   BrowserSession,
   checkDeps,
@@ -30,9 +30,10 @@ import {
   timestamp,
   findPython,
   type StepEvent,
-} from '@uitester/engine';
+} from '@joule/engine';
 
-const SETTINGS_FILE = join(homedir(), '.uitester', 'settings.json');
+/** $JOULE_HOME lets the portable desktop app keep its settings next to the exe. */
+const settingsFile = () => join(process.env.JOULE_HOME || join(homedir(), '.joule'), 'settings.json');
 
 type Handler<K extends RequestType> = (payload: Requests[K][0]) => Promise<Requests[K][1]>;
 
@@ -61,16 +62,22 @@ const MIME: Record<string, string> = {
 };
 
 async function readSettings(): Promise<AppSettings> {
-  try {
-    return { recent: [], ...JSON.parse(await readFile(SETTINGS_FILE, 'utf8')) };
-  } catch {
-    return { recent: [] };
+  // Settings from before the rename to Joule are picked up until the first save writes the new file.
+  const legacy = process.env.JOULE_HOME ? [] : [join(homedir(), '.uitester', 'settings.json')];
+  for (const file of [settingsFile(), ...legacy]) {
+    try {
+      return { recent: [], ...JSON.parse(await readFile(file, 'utf8')) };
+    } catch {
+      /* try the next one */
+    }
   }
+  return { recent: [] };
 }
 
 async function writeSettings(s: AppSettings): Promise<void> {
-  await mkdir(dirname(SETTINGS_FILE), { recursive: true });
-  await writeFile(SETTINGS_FILE, JSON.stringify(s, null, 2));
+  const file = settingsFile();
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(s, null, 2));
 }
 
 export async function startServer(opts: ServerOptions) {
@@ -118,7 +125,7 @@ export async function startServer(opts: ServerOptions) {
       project = await loadProject(dir);
       edits = await externallyEdited(dir, project);
     } else {
-      // Not created by UITester: try to read the Robot files in it.
+      // Not created by Joule: try to read the Robot files in it.
       const r = await importFolder(dir, await python());
       project = r.project;
       warnings = r.warnings;
@@ -174,7 +181,7 @@ export async function startServer(opts: ServerOptions) {
     },
     'project.create': async ({ dir, name, url }) => {
       dir = resolve(dir);
-      if (isProjectDir(dir)) throw new Error('This folder already contains a UITester project');
+      if (isProjectDir(dir)) throw new Error('This folder already contains a Joule project');
       await mkdir(dir, { recursive: true });
       project = await saveProject(dir, newProject(name, url));
       projectDir = dir;
@@ -215,6 +222,8 @@ export async function startServer(opts: ServerOptions) {
       const r = await session.count(selector);
       return typeof r === 'number' ? { count: r } : { count: 0, error: r.error };
     },
+    'view.pickConstraint': ({ constraint }) => session.setPickConstraint(constraint),
+    'view.describeParent': async ({ selector }) => ({ descriptor: await session.describeParent(selector) }),
 
     'run.live': async ({ project: p, testId, stepIds, fromStart }) => {
       if (liveAbort || robotRun) throw new Error('A run is already in progress');

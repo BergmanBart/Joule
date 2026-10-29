@@ -1,6 +1,6 @@
 /**
- * End-to-end: fixture site + UITester server + built UI, driven by a real (headless) browser.
- * Run `npm run build -w @uitester/ui` first. Set SHOTS=<dir> to keep screenshots.
+ * End-to-end: fixture site + Joule server + built UI, driven by a real (headless) browser.
+ * Run `npm run build -w @joule/ui` first. Set SHOTS=<dir> to keep screenshots.
  */
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { newProject, Project } from '@uitester/core';
-import { saveProject } from '@uitester/core/node';
-import { checkDeps, launchBrowser } from '@uitester/engine';
+import { newProject, Project } from '@joule/core';
+import { saveProject } from '@joule/core/node';
+import { checkDeps, launchBrowser } from '@joule/engine';
 import type { Browser, Locator, Page } from 'playwright-core';
 import { serveFixtures } from '../../fixtures/serve';
 import { startServer } from '../src';
@@ -56,13 +56,13 @@ async function centre(url: string, selector: string) {
 
 const textToEnter = () => page.locator('.details .field', { hasText: 'Text to enter' }).locator('input.input');
 
-describe.runIf(existsSync(join(UI, 'index.html')))('UITester app', () => {
+describe.runIf(existsSync(join(UI, 'index.html')))('Joule app', () => {
   beforeAll(async () => {
     // the temp project has no .venv: point the app at the repo's Robot Framework install
     const deps = await checkDeps(process.cwd());
-    if (deps.python) process.env.UITESTER_PYTHON = deps.python.path;
+    if (deps.python) process.env.JOULE_PYTHON = deps.python.path;
     site = await serveFixtures(SITE_PORT);
-    dir = await mkdtemp(join(tmpdir(), 'uitester-ui-'));
+    dir = await mkdtemp(join(tmpdir(), 'joule-ui-'));
     const p = newProject('Fixture shop', SITE);
     p.settings.browser = 'msedge';
     p.settings.width = 1000;
@@ -234,4 +234,39 @@ describe.runIf(existsSync(join(UI, 'index.html')))('UITester app', () => {
     const t2 = await readFile(join(dir, 'tests', 'Test2.robot'), 'utf8');
     expect(t2).toMatch(/\n    Login form\n    Click    css=button\[data-testid="login"\]\n    Wait For Load State    load\n    Pause For Key\n/);
   }, 90_000);
+
+  it('narrows an element down with must be inside + parent also contains, and collapses search details', async () => {
+    // still on the dashboard after the Test2 run; every row has a Delete button
+    await page.locator('button[title="New test"]').click();
+    await text(page.locator('.list-item.active .name'), 'Test3');
+    const dashboard = `${SITE}dashboard.html?username=alice`;
+    const del = await centre(dashboard, 'li:nth-child(2) button');
+    const pear = await centre(dashboard, 'li:nth-child(2) .name');
+    await clickInView(del.x, del.y);
+    await text(page.locator('.step-row .step-label'), /Click button "Delete"/);
+    await visible(page.getByText(/Finds 2 elements/));
+
+    await page.locator('.details').getByRole('button', { name: /Must be inside/ }).click();
+    await visible(page.getByText('Click a parent of the element'));
+    await clickInView(pear.x, pear.y); // the name is not a parent of a Delete button: its row is picked
+    await text(page.locator('.step-row .step-label'), /Click button "Delete" in li/);
+    await visible(page.locator('.details .scope'));
+
+    await page.locator('.details').getByRole('button', { name: /Parent also contains/ }).click();
+    await visible(page.getByText('Click an element inside the parent'));
+    await clickInView(pear.x, pear.y);
+    await visible(page.getByText('Finds exactly 1 element'));
+    await text(page.locator('.details .selector-preview'), 'css=li:has(span:text-is("Pear")) >> css=button:text-is("Delete")');
+    await shot('12-must-be-inside');
+
+    await page.locator('.details .collapse-toggle').click();
+    await count(page.locator('.details .prop'), 0);
+    await visible(page.locator('.details .selector-preview.one-line'));
+    await page.locator('.details .collapse-toggle').click();
+    await visible(page.locator('.details .scope'));
+
+    await expect
+      .poll(() => readFile(join(dir, 'tests', 'Test3.robot'), 'utf8').catch(() => ''), { timeout: 5000 })
+      .toContain('Click    css=li:has(span:text-is("Pear")) >> css=button:text-is("Delete")');
+  }, 60_000);
 });

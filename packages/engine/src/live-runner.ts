@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { Locator as PwLocator, Page } from 'playwright-core';
-import { buildSelector, interpolate, type Assertion, type Keyword, type Locator, type Operator, type Step } from '@uitester/core';
+import { buildSelector, interpolate, type Assertion, type Keyword, type Locator, type Operator, type Step } from '@joule/core';
 
 export type StepStatus = 'running' | 'pass' | 'fail' | 'skip';
 

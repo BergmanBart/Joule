@@ -1,5 +1,5 @@
 import { AlertTriangle, Plus, Trash2, Variable } from 'lucide-react';
-import { ENVIRONMENTS, PARAM_NAME, type Environment, type Parameter } from '@uitester/core';
+import { ENVIRONMENTS, PARAM_NAME, type Environment, type Parameter } from '@joule/core';
 import { Modal, TextField } from '../components/ui';
 import { edit, editTest, useStore } from '../store';
 

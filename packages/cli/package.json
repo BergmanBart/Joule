@@ -1,9 +1,9 @@
 {
-  "name": "uitester",
+  "name": "joule",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "uitester": "./bin/uitester.js"
+    "joule": "./bin/joule.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts --dev",
@@ -22,8 +22,8 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@uitester/core": "*",
-    "@uitester/engine": "*",
-    "@uitester/server": "*"
+    "@joule/core": "*",
+    "@joule/engine": "*",
+    "@joule/server": "*"
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Turn parsed Robot Framework files (see engine/parse_robot.py) back into a UITester project.
+ * Turn parsed Robot Framework files (see engine/parse_robot.py) back into a Joule project.
  * Known Browser library keywords become steps; anything else is kept verbatim as a raw step.
  */
 import { newId } from '../ids';
@@ -45,8 +45,10 @@ export interface ParsedFolder {
 }
 
 const norm = (name: string) => name.toLowerCase().replace(/^browser\./, '').replace(/[\s_]/g, '');
-const HELPER_RESOURCE = 'resources/uitester.resource';
-const SETUP_KEYWORDS = new Set(['newbrowser', 'newcontext', 'newpage', 'closebrowser', 'openuitesterbrowser', 'openbrowser', 'closeallbrowsers']);
+// The uitester names are what projects generated before the rename to Joule contain.
+const HELPER_RESOURCES = new Set(['resources/joule.resource', 'resources/uitester.resource']);
+const OPEN_BROWSER = new Set(['openjoulebrowser', 'openuitesterbrowser']);
+const SETUP_KEYWORDS = new Set(['newbrowser', 'newcontext', 'newpage', 'closebrowser', ...OPEN_BROWSER, 'openbrowser', 'closeallbrowsers']);
 
 function locator(selector: string): Locator {
   const s = unarg(selector);
@@ -159,8 +161,8 @@ function convertCall(c: ParsedCall, scope: Scope): Step | undefined {
   const kw = norm(c.keyword);
   const sig = normalizeRow(c.lines.join(' ').trim());
   if (SETUP_KEYWORDS.has(kw)) {
-    if (kw !== 'openuitesterbrowser' && kw !== 'closebrowser') scope.warnings.push(`Kept browser setup line as raw Robot: ${c.lines[0]?.trim()}`);
-    return kw === 'openuitesterbrowser' || kw === 'closebrowser' ? undefined : rawStep(c.lines);
+    if (!OPEN_BROWSER.has(kw) && kw !== 'closebrowser') scope.warnings.push(`Kept browser setup line as raw Robot: ${c.lines[0]?.trim()}`);
+    return OPEN_BROWSER.has(kw) || kw === 'closebrowser' ? undefined : rawStep(c.lines);
   }
   if (!c.assign.length) {
     const action = actionFrom(kw, c.args);
@@ -201,7 +203,7 @@ function convertCall(c: ParsedCall, scope: Scope): Step | undefined {
     const local = !c.args.length ? scope.local.get(kw) : undefined;
     if (local && scope.depth < 20) {
       const doc = docOf(local.body);
-      const id = /^UITester group (\S+)/.exec(doc ?? '')?.[1] ?? newId('s');
+      const id = /^(?:Joule|UITester) group (\S+)/.exec(doc ?? '')?.[1] ?? newId('s');
       const steps = convertBody(local.body, { ...scope, depth: scope.depth + 1 });
       return { id, name: local.name, type: 'group', collapsed: false, steps };
     }
@@ -267,24 +269,24 @@ function varName(name: string): string {
   return name.replace(/^[$@&]\{/, '').replace(/\}=?\s*$/, '');
 }
 
-/** Build a project from parsed files. `existing` (the uitester.json) keeps settings and recorded element details. */
+/** Build a project from parsed files. `existing` (the joule.json) keeps settings and recorded element details. */
 export function importParsed(parsed: ParsedFolder, name: string, existing?: Project): { project: Project; warnings: string[] } {
   const warnings: string[] = [];
   for (const f of parsed.files) if (f.error) warnings.push(`${f.file}: ${f.error}`);
-  const files = parsed.files.filter((f) => !f.error && f.file !== HELPER_RESOURCE);
+  const files = parsed.files.filter((f) => !f.error && !HELPER_RESOURCES.has(f.file));
   const oldKeywordNames = existing ? sharedKeywordNames(existing.keywords) : new Map<string, string>();
 
   // Shared keywords: everything defined in .resource files.
   const sharedDefs = files.filter((f) => f.file.endsWith('.resource')).flatMap((f) => f.keywords.map((k) => ({ file: f, k })));
   const shared = new Map<string, string>();
   const keywordIds = sharedDefs.map(({ k }) => {
-    const id = /^UITester keyword (\S+)/.exec(docOf(k.body) ?? '')?.[1] ?? newId('k');
+    const id = /^(?:Joule|UITester) keyword (\S+)/.exec(docOf(k.body) ?? '')?.[1] ?? newId('k');
     shared.set(norm(k.name), id);
     return id;
   });
   // Groups inside keywords.resource are generated as extra keywords there; they are local to that file, not shared.
   const groupNames = new Set(
-    sharedDefs.filter(({ k }) => /^UITester group /.test(docOf(k.body) ?? '')).map(({ k }) => norm(k.name)),
+    sharedDefs.filter(({ k }) => /^(?:Joule|UITester) group /.test(docOf(k.body) ?? '')).map(({ k }) => norm(k.name)),
   );
   for (const g of groupNames) shared.delete(g);
 
@@ -312,7 +314,7 @@ export function importParsed(parsed: ParsedFolder, name: string, existing?: Proj
       .map((v) => ({ name: varName(v.name), values: { default: unarg(v.value.join(' ')) } }));
     for (const t of f.tests) {
       const doc = docOf(t.body) ?? '';
-      const id = /^UITester test (\S+)/.exec(doc)?.[1] ?? newId('t');
+      const id = /^(?:Joule|UITester) test (\S+)/.exec(doc)?.[1] ?? newId('t');
       const old = existing?.tests.find((x) => x.id === id);
       const tags = t.body.flatMap((b) => (b.kind === 'tags' ? b.values : [])).map((x) => x.toLowerCase());
       const scope: Scope = { local, shared, pool: signaturePool(old?.steps ?? [], oldKeywordNames), warnings, depth: 0 };
@@ -332,7 +334,7 @@ export function importParsed(parsed: ParsedFolder, name: string, existing?: Proj
     }
   }
 
-  // Project parameters: env/*.py variable files (generated by UITester) or the existing ones.
+  // Project parameters: env/*.py variable files (generated by Joule) or the existing ones.
   const parameters: Parameter[] = existing ? structuredClone(existing.parameters) : [];
   for (const env of [...ENVIRONMENTS]) {
     for (const [key, value] of Object.entries(parsed.env[env] ?? {})) {

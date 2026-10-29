@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { newProject, Project, type ElementDescriptor, type Step } from '@uitester/core';
-import { saveProject } from '@uitester/core/node';
+import { newProject, Project, type ElementDescriptor, type Step } from '@joule/core';
+import { saveProject } from '@joule/core/node';
 import { BrowserSession, checkDeps, LiveRunner, RobotRun, type StepEvent } from '../src';
 import { serveFixtures } from '../../fixtures/serve';
 
@@ -62,6 +62,26 @@ function loginSteps(): Step[] {
       locator: { props: d('p', {}, { id: 'status' }), use: ['id'] },
       assertion: { property: 'text', operator: '==', expected: 'Size Large' },
     },
+    {
+      id: 'del',
+      name: '',
+      type: 'element',
+      mode: 'action',
+      locator: {
+        props: d('button', {}, { text: 'Delete' }),
+        use: ['tag', 'text'],
+        within: { parent: { props: d('li', {}), use: ['tag'] }, has: [{ props: d('span', {}, { text: 'Pear' }), use: ['tag', 'text'] }] },
+      },
+      action: { kind: 'click' },
+    },
+    {
+      id: 'left',
+      name: '',
+      type: 'element',
+      mode: 'assert',
+      locator: { props: d('span', {}, { classes: ['name'] }), use: ['class:name'] },
+      assertion: { property: 'text', operator: '==', expected: 'Apple' },
+    },
     { id: 'shot', name: '', type: 'screenshot', filename: 'dashboard', fullPage: false },
   ];
 }
@@ -90,13 +110,41 @@ describe('browser session', () => {
     expect(await session.count('css=[[bad')).toMatchObject({ error: expect.any(String) });
     await session.setHighlights([{ n: 1, selector: 'css=input', kind: 'selected', all: true }]);
   });
+
+  it('resolves must-be-inside selectors and limits scope picks', async () => {
+    await session.navigate(URL + 'dashboard.html');
+    expect(await session.count('css=button:text-is("Delete")')).toBe(2);
+    expect(await session.count('css=li:has(span:text-is("Pear")) >> css=button:text-is("Delete")')).toBe(1);
+    expect(await session.count('xpath=//li >> internal:has="css=span:text-is(\\"Pear\\")" >> css=button')).toBe(1);
+    expect(await session.describeParent('css=span:text-is("Pear")')).toMatchObject({ tag: 'li' });
+
+    const clickPick = async (selector: string) => {
+      const box = (await session.page!.locator(selector).boundingBox())!;
+      const pick = new Promise<ElementDescriptor>((r) => session.once('pick', r));
+      await session.mouse({ type: 'down', x: box.x + 3, y: box.y + 3, button: 'left', clickCount: 1 });
+      await session.mouse({ type: 'up', x: box.x + 3, y: box.y + 3, button: 'left', clickCount: 1 });
+      return Promise.race([pick, new Promise<undefined>((r) => setTimeout(r, 500))]);
+    };
+    await session.setMode('record');
+    // parent pick: the name is not an ancestor of a Delete button, its row is
+    expect(await session.setPickConstraint({ selector: 'css=button.delete', relation: 'ancestor' })).toEqual({ found: true });
+    expect(await clickPick('css=span:text-is("Pear")')).toMatchObject({ tag: 'li' });
+    // contains pick: only inside a row
+    await session.setPickConstraint({ selector: 'css=li', relation: 'descendant' });
+    expect(await clickPick('css=span:text-is("Pear")')).toMatchObject({ tag: 'span', text: 'Pear' });
+    expect(await clickPick('#welcome')).toBeUndefined();
+    expect(await session.setPickConstraint({ selector: 'css=#nope', relation: 'ancestor' })).toEqual({ found: false });
+    await session.setPickConstraint(null);
+    await session.setMode('interact');
+    await session.navigate(URL);
+  });
 });
 
 describe('live runner', () => {
   it('runs login → dashboard with params, if and assertions', async () => {
     await session.navigate(URL);
     const events: StepEvent[] = [];
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-live-'));
+    const dir = await mkdtemp(join(tmpdir(), 'joule-live-'));
     const ok = await new LiveRunner({
       page: session.page!,
       steps: loginSteps(),
@@ -112,7 +160,7 @@ describe('live runner', () => {
     const failed = events.filter((e) => e.status === 'fail');
     expect(failed).toEqual([]);
     expect(ok).toBe(true);
-    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['u', 'p', 'c', 'w', 'a', 'sel', 'if', 'a2', 'shot']);
+    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['u', 'p', 'c', 'w', 'a', 'sel', 'if', 'a2', 'del', 'left', 'shot']);
   }, 30_000);
 
   it('reports the failing step and stops', async () => {
@@ -141,7 +189,7 @@ describe('live runner', () => {
 describe('robot runner', async () => {
   const deps = await checkDeps(process.cwd());
   it.runIf(deps.ok)('runs the generated suite with Robot Framework', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-robot-'));
+    const dir = await mkdtemp(join(tmpdir(), 'joule-robot-'));
     const p = newProject('Fixture', URL);
     p.settings.browser = 'msedge';
     p.parameters.push({ name: 'USERNAME', values: { default: 'alice', PROD: 'carol' } });
@@ -169,7 +217,7 @@ describe('robot runner', async () => {
   }, 180_000);
 
   it.runIf(deps.ok)('pauses a Robot run until the app says continue', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-pause-'));
+    const dir = await mkdtemp(join(tmpdir(), 'joule-pause-'));
     const p = newProject('Pause', URL);
     p.settings.browser = 'msedge';
     p.tests[0].steps = [{ id: 'pz', name: '', type: 'pause', message: 'Check the page' }];

@@ -1,18 +1,20 @@
 {
-  "name": "uitester-monorepo",
+  "name": "joule-monorepo",
   "private": true,
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w uitester",
-    "build": "npm run build -w @uitester/ui && npm run build -w uitester",
-    "start": "node packages/cli/bin/uitester.js",
+    "dev": "npm run dev -w joule",
+    "build": "npm run build -w @joule/ui && npm run build -w joule",
+    "start": "node packages/cli/bin/joule.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "sample": "tsx packages/fixtures/make-sample.ts",
-    "fixtures": "tsx packages/fixtures/serve.ts"
+    "fixtures": "tsx packages/fixtures/serve.ts",
+    "desktop": "npm run build -w @joule/ui && npm run start -w joule-desktop",
+    "package:desktop": "npm run build -w @joule/ui && npm run package -w joule-desktop"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

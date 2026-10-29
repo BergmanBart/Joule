@@ -1,8 +1,8 @@
-import type { Events, EventType, Requests, RequestType } from '@uitester/core';
+import type { Events, EventType, Requests, RequestType } from '@joule/core';
 
 type Listener<E extends EventType> = (data: Events[E]) => void;
 
-/** WebSocket client for the UITester server; reconnects automatically. */
+/** WebSocket client for the Joule server; reconnects automatically. */
 class Api {
   private ws?: WebSocket;
   private nextId = 1;
@@ -13,7 +13,7 @@ class Api {
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = (window as any).__UITESTER_WS__ ?? `${proto}://${location.host}/ws`;
+    const url = (window as any).__JOULE_WS__ ?? `${proto}://${location.host}/ws`;
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {

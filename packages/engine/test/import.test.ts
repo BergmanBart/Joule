@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { newProject, Project, type Step } from '@uitester/core';
-import { externallyEdited, saveProject } from '@uitester/core/node';
+import { newProject, Project, type Step } from '@joule/core';
+import { externallyEdited, saveProject } from '@joule/core/node';
 import { findPython, importFolder } from '../src';
 
 const python = await findPython(process.cwd());
@@ -52,8 +52,8 @@ function project(): Project {
 }
 
 describe.runIf(python)('robot import', () => {
-  it('round-trips a UITester project through its .robot files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-import-'));
+  it('round-trips a Joule project through its .robot files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-import-'));
     const saved = await saveProject(dir, project());
     const { project: back, warnings } = await importFolder(dir, python!, saved);
     expect(warnings).toEqual([]);
@@ -63,7 +63,7 @@ describe.runIf(python)('robot import', () => {
   });
 
   it('detects hand edits and keeps unchanged steps', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-edit-'));
+    const dir = await mkdtemp(join(tmpdir(), 'joule-edit-'));
     const saved = await saveProject(dir, project());
     const file = join(dir, 'tests', 'Test1.robot');
     const text = await readFile(file, 'utf8');
@@ -76,8 +76,8 @@ describe.runIf(python)('robot import', () => {
     expect(raw?.lines).toEqual(['Log    hand written']);
   });
 
-  it('opens a plain Robot suite that UITester did not create', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'uitester-foreign-'));
+  it('opens a plain Robot suite that Joule did not create', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-foreign-'));
     await mkdir(join(dir, 'suites'));
     await writeFile(
       join(dir, 'suites', 'shop.robot'),

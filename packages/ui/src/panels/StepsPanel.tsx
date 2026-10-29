@@ -25,7 +25,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { describeStep, findStep, newId, numberSteps, positionOf, type Step } from '@uitester/core';
+import { describeStep, findStep, newId, numberSteps, positionOf, type Step } from '@joule/core';
 import { api } from '../api';
 import { Menu, MenuItem } from '../components/ui';
 import { TypeIcon } from '../stepMeta';
@@ -111,7 +111,7 @@ export function StepsPanel() {
   }
 
   function onDragOver(e: DragEvent, row: Row, key: string) {
-    if (!e.dataTransfer.types.includes('application/x-uitester-steps')) return;
+    if (!e.dataTransfer.types.includes('application/x-joule-steps')) return;
     e.preventDefault();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const y = (e.clientY - r.top) / r.height;
@@ -122,7 +122,7 @@ export function StepsPanel() {
 
   function onDrop(e: DragEvent, row: Row) {
     e.preventDefault();
-    const ids = JSON.parse(e.dataTransfer.getData('application/x-uitester-steps') || '[]') as string[];
+    const ids = JSON.parse(e.dataTransfer.getData('application/x-joule-steps') || '[]') as string[];
     const t = drop && dropTarget(row, drop.pos);
     setDrop(null);
     if (t && ids.length) moveSelected(ids, t.target, t.index);
@@ -198,7 +198,7 @@ export function StepsPanel() {
         style={{ paddingLeft: 8 + row.depth * INDENT }}
         draggable
         onDragStart={(e) => {
-          e.dataTransfer.setData('application/x-uitester-steps', JSON.stringify(dragIds(s.id)));
+          e.dataTransfer.setData('application/x-joule-steps', JSON.stringify(dragIds(s.id)));
           e.dataTransfer.effectAllowed = 'move';
         }}
         onDragOver={(e) => onDragOver(e, row, key)}
@@ -345,10 +345,10 @@ export function StepsPanel() {
         style={{ outline: 'none', paddingBottom: 40 }}
         onKeyDown={onKeyDown}
         onClick={(e) => e.target === e.currentTarget && clearSelection()}
-        onDragOver={(e) => e.dataTransfer.types.includes('application/x-uitester-steps') && e.preventDefault()}
+        onDragOver={(e) => e.dataTransfer.types.includes('application/x-joule-steps') && e.preventDefault()}
         onDrop={(e) => {
           if (e.target !== e.currentTarget) return;
-          const ids = JSON.parse(e.dataTransfer.getData('application/x-uitester-steps') || '[]') as string[];
+          const ids = JSON.parse(e.dataTransfer.getData('application/x-joule-steps') || '[]') as string[];
           if (ids.length) moveSelected(ids, 'root', steps.length);
         }}
       >
