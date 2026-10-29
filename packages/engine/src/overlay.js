@@ -76,20 +76,60 @@
     if (!frame) frame = requestAnimationFrame(draw);
   }
 
+  // ---------- shadow DOM ----------
+  // Playwright's css engine pierces open shadow roots (also with `>` from a host to its shadow children) and
+  // xpath does not. So walk the composed tree: up through shadow hosts, and count matches in every open root.
+
+  /** Parent element, or the shadow host for a top-level element inside a shadow root. */
+  function parentOrHost(n) {
+    if (n.parentElement) return n.parentElement;
+    const root = n.parentNode;
+    return root instanceof ShadowRoot ? root.host : null;
+  }
+
+  function containsDeep(ancestor, n) {
+    for (; n; n = parentOrHost(n)) if (n === ancestor) return true;
+    return false;
+  }
+
+  function closestDeep(el, selector) {
+    for (let n = el; n; n = parentOrHost(n)) if (n.matches(selector)) return n;
+    return null;
+  }
+
+  /** Every open shadow root in the page (closed ones are out of reach for Playwright too). */
+  function shadowRoots() {
+    const out = [];
+    const walk = (root) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          out.push(el.shadowRoot);
+          walk(el.shadowRoot);
+        }
+      }
+    };
+    walk(document);
+    return out;
+  }
+
   // ---------- element description ----------
 
-  function uniqueId(id) {
+  function uniqueId(id, roots) {
     try {
-      return document.querySelectorAll('#' + CSS.escape(id)).length === 1;
+      const sel = '#' + CSS.escape(id);
+      let n = document.querySelectorAll(sel).length;
+      for (const r of roots) n += r.querySelectorAll(sel).length;
+      return n === 1;
     } catch {
       return false;
     }
   }
 
-  function xpath(el) {
+  function xpath(el, roots) {
+    if (el.getRootNode() !== document) return undefined; // xpath can't reach into a shadow root
     const parts = [];
     for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
-      if (n.id && uniqueId(n.id) && !n.id.includes('"')) {
+      if (n.id && uniqueId(n.id, roots) && !n.id.includes('"')) {
         parts.unshift(`//*[@id="${n.id}"]`);
         return parts.join('/');
       }
@@ -100,17 +140,17 @@
     return '/' + parts.join('/');
   }
 
-  function cssPath(el) {
+  function cssPath(el, roots) {
     const parts = [];
-    for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
-      if (n.id && uniqueId(n.id)) {
+    for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = parentOrHost(n)) {
+      if (n.id && uniqueId(n.id, roots)) {
         parts.unshift('#' + CSS.escape(n.id));
         return parts.join(' > ');
       }
       let part = n.tagName.toLowerCase();
-      const parent = n.parentElement;
-      if (parent) {
-        const same = [...parent.children].filter((c) => c.tagName === n.tagName);
+      const siblings = n.parentElement ? n.parentElement.children : n.parentNode instanceof ShadowRoot ? n.parentNode.children : null;
+      if (siblings) {
+        const same = [...siblings].filter((c) => c.tagName === n.tagName);
         if (same.length > 1) part += `:nth-of-type(${same.indexOf(n) + 1})`;
       }
       parts.unshift(part);
@@ -124,7 +164,9 @@
       if (a.name === 'style') continue;
       attributes[a.name] = a.value.length > 300 ? a.value.slice(0, 300) : a.value;
     }
+    // light DOM text only: Playwright's :text-is() doesn't see text inside a host's shadow root either
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const roots = shadowRoots();
     return {
       tag: el.tagName.toLowerCase(),
       id: el.id || undefined,
@@ -132,27 +174,33 @@
       attributes,
       text: text && text.length <= 200 ? text : undefined,
       role: el.getAttribute('role') || undefined,
-      xpath: xpath(el),
-      cssPath: cssPath(el),
+      xpath: xpath(el, roots),
+      cssPath: cssPath(el, roots),
     };
   }
 
   const INTERACTIVE = 'button, a[href], input, select, textarea, label, summary, [role=button], [role=link], [role=checkbox], [role=tab], [role=menuitem], [onclick], [contenteditable]';
+
+  /** The real element under the pointer: events seen on window are retargeted to the outermost shadow host. */
+  function eventTarget(e) {
+    const t = e.composedPath()[0];
+    return t instanceof Element ? t : e.target;
+  }
 
   function pickTarget(t) {
     if (!(t instanceof Element) || t === host) return null;
     const c = state.constraint;
     if (c && c.relation === 'ancestor') {
       // the smallest ancestor of an anchor under the cursor
-      for (let n = t; n; n = n.parentElement) if (c.els.some((el) => n !== el && n.contains(el))) return n;
+      for (let n = t; n; n = parentOrHost(n)) if (c.els.some((el) => n !== el && containsDeep(n, el))) return n;
       return null;
     }
     if (c && c.relation === 'descendant') {
-      const inside = (n) => n && c.els.some((el) => n !== el && el.contains(n));
-      const el = t.closest(INTERACTIVE);
+      const inside = (n) => n && c.els.some((el) => n !== el && containsDeep(el, n));
+      const el = closestDeep(t, INTERACTIVE);
       return inside(el) ? el : inside(t) ? t : null;
     }
-    return t.closest(INTERACTIVE) || t;
+    return closestDeep(t, INTERACTIVE) || t;
   }
 
   // ---------- record mode input capture ----------
@@ -171,7 +219,7 @@
     (e) => {
       if (state.mode !== 'record') return;
       block(e);
-      const el = pickTarget(e.target);
+      const el = pickTarget(eventTarget(e));
       if (el && window.__joulePick) window.__joulePick(describe(el));
     },
     true,
@@ -180,7 +228,7 @@
     'mousemove',
     (e) => {
       if (state.mode !== 'record') return;
-      const el = pickTarget(e.target);
+      const el = pickTarget(eventTarget(e));
       if (el !== state.hover) {
         state.hover = el;
         schedule();
@@ -197,8 +245,17 @@
     clearTimeout(changeTimer);
     changeTimer = setTimeout(() => window.__jouleChanged && window.__jouleChanged(), 400);
   }
+  const OBSERVE = { subtree: true, childList: true, attributes: true, characterData: true };
+  const observer = new MutationObserver(onMutations);
+  // A document observer doesn't see changes inside shadow roots: observe every open root as it is attached.
+  const attachShadow = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (init) {
+    const root = attachShadow.call(this, init);
+    if (init && init.mode === 'open') observer.observe(root, OBSERVE);
+    return root;
+  };
   function observe() {
-    new MutationObserver(onMutations).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    observer.observe(document, OBSERVE);
   }
   if (document.documentElement) observe();
   else document.addEventListener('DOMContentLoaded', observe);
@@ -219,6 +276,11 @@
       schedule();
     },
     describe,
+    /** Description of the parent (or shadow host) of `el`; undefined at the top of the page. */
+    describeParent(el) {
+      const p = parentOrHost(el);
+      return p && p !== document.documentElement ? describe(p) : undefined;
+    },
   };
 
   if (window.__jouleHello) {

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture shop – shadow DOM</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card wide">
+    <h1 id="title">Basket</h1>
+    <!-- open shadow root with nested open shadow roots: one row component per item -->
+    <fruit-list></fruit-list>
+    <!-- closed shadow root: not reachable by Playwright, only the host can be picked -->
+    <secret-box></secret-box>
+    <p id="status"></p>
+  </main>
+  <script>
+    const sheet = '<style>.btn { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font: inherit; } ul { padding-left: 18px; } .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }</style>';
+
+    customElements.define('fruit-row', class extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        this.attachShadow({ mode: 'open' }).innerHTML =
+          sheet + `<div class="row"><span class="name">${this.getAttribute('name')}</span><button class="btn delete">Delete</button></div>`;
+        this.shadowRoot.querySelector('.delete').addEventListener('click', () => {
+          document.getElementById('status').textContent = 'Deleted ' + this.getAttribute('name');
+          this.closest('li')?.remove() ?? this.remove();
+        });
+      }
+    });
+
+    customElements.define('fruit-list', class extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = sheet + '<ul class="items"></ul><button id="add" class="btn">Add item</button>';
+        let n = 0;
+        const add = (name) => {
+          const li = document.createElement('li');
+          li.innerHTML = `<fruit-row name="${name}"></fruit-row>`;
+          root.querySelector('ul').append(li);
+        };
+        ['Apple', 'Pear'].forEach(add);
+        root.getElementById('add').addEventListener('click', () => add('Item ' + ++n));
+      }
+    });
+
+    customElements.define('secret-box', class extends HTMLElement {
+      connectedCallback() {
+        this.attachShadow({ mode: 'closed' }).innerHTML = sheet + '<button class="btn">Secret</button>';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { newProject, Project, type ElementDescriptor, type Step } from '@joule/core';
+import { buildSelector, defaultHasUse, defaultScopeUse, defaultUse, newProject, Project, type ElementDescriptor, type Step } from '@joule/core';
 import { saveProject } from '@joule/core/node';
 import { BrowserSession, checkDeps, LiveRunner, RobotRun, type StepEvent } from '../src';
 import { serveFixtures } from '../../fixtures/serve';
@@ -86,6 +86,26 @@ function loginSteps(): Step[] {
   ];
 }
 
+/** Pear's Delete button inside nested open shadow roots, found via "must be inside" a row that contains "Pear". */
+function shadowSteps(): Step[] {
+  return [
+    {
+      id: 'sd',
+      name: '',
+      type: 'element',
+      mode: 'action',
+      locator: {
+        props: d('button', {}, { classes: ['btn', 'delete'], text: 'Delete' }),
+        use: ['tag', 'text'],
+        within: { parent: { props: d('div', {}, { classes: ['row'] }), use: ['tag', 'class:row'] }, has: [{ props: d('span', {}, { text: 'Pear' }), use: ['tag', 'text'] }] },
+      },
+      action: { kind: 'click' },
+    },
+    { id: 'ss', name: '', type: 'element', mode: 'assert', locator: { props: d('p', {}, { id: 'status' }), use: ['id'] }, assertion: { property: 'text', operator: '==', expected: 'Deleted Pear' } },
+    { id: 'sc', name: '', type: 'element', mode: 'assert', locator: { props: d('fruit-row', {}), use: ['tag'] }, assertion: { property: 'count', operator: '==', expected: '1' } },
+  ];
+}
+
 describe('browser session', () => {
   it('streams frames and turns record-mode clicks into picks', async () => {
     const frame = new Promise((r) => session.once('frame', r));
@@ -136,6 +156,49 @@ describe('browser session', () => {
     expect(await session.setPickConstraint({ selector: 'css=#nope', relation: 'ancestor' })).toEqual({ found: false });
     await session.setPickConstraint(null);
     await session.setMode('interact');
+    await session.navigate(URL);
+  });
+
+  it('records, scopes and outlines elements inside (nested) shadow roots', async () => {
+    await session.navigate(URL + 'shadow.html');
+    const clickPick = async (selector: string) => {
+      const box = (await session.page!.locator(selector).first().boundingBox())!;
+      const pick = new Promise<ElementDescriptor>((r) => session.once('pick', r));
+      await session.mouse({ type: 'down', x: box.x + 3, y: box.y + 3, button: 'left', clickCount: 1 });
+      await session.mouse({ type: 'up', x: box.x + 3, y: box.y + 3, button: 'left', clickCount: 1 });
+      return Promise.race([pick, new Promise<undefined>((r) => setTimeout(r, 500))]);
+    };
+    await session.setMode('record');
+    // the button itself, not the outer <fruit-list> host the event is retargeted to
+    const del = await clickPick('fruit-row[name=Pear] >> button.delete');
+    expect(del).toMatchObject({ tag: 'button', classes: ['btn', 'delete'], text: 'Delete', xpath: undefined });
+    expect(await session.count(`css=${del!.cssPath}`)).toBe(1);
+    expect(await session.count(buildSelector({ props: del!, use: defaultUse(del!) }))).toBe(2);
+
+    // must be inside: the row div in the row's shadow root, then its host
+    await session.setPickConstraint({ selector: 'css=button:text-is("Delete")', relation: 'ancestor' });
+    const row = await clickPick('fruit-row[name=Pear] >> span.name');
+    expect(row).toMatchObject({ tag: 'div', classes: ['row'] });
+    expect(await session.describeParent('css=fruit-row[name=Pear] div.row')).toMatchObject({ tag: 'fruit-row', attributes: { name: 'Pear' } });
+    // parent also contains: inside a row
+    await session.setPickConstraint({ selector: 'css=div.row', relation: 'descendant' });
+    const name = await clickPick('fruit-row[name=Pear] >> span.name');
+    expect(name).toMatchObject({ tag: 'span', text: 'Pear' });
+    const within = { parent: { props: row!, use: defaultScopeUse(row!) }, has: [{ props: name!, use: defaultHasUse(name!) }] };
+    expect(await session.count(buildSelector({ props: del!, use: defaultUse(del!), within }))).toBe(1);
+    await session.setPickConstraint(null);
+
+    // closed shadow root: only the host is reachable
+    expect(await clickPick('secret-box')).toMatchObject({ tag: 'secret-box' });
+    await session.setMode('interact');
+
+    // changes inside a shadow root re-resolve the outlines
+    let refreshed = 0;
+    const refresh = session.refresh.bind(session);
+    session.refresh = async () => (refreshed++, refresh());
+    await session.page!.locator('fruit-list #add').click();
+    await expect.poll(() => refreshed, { timeout: 3000 }).toBeGreaterThan(0);
+    session.refresh = refresh;
     await session.navigate(URL);
   });
 });
@@ -196,7 +259,15 @@ describe('robot runner', async () => {
     p.tests[0].steps = loginSteps();
     const second = { ...structuredClone(p.tests[0]), id: 't2', name: 'login as prod user' };
     p.tests.push(second);
-    p.settings.runPlan = [{ tests: [p.tests[0].id, 't2'] }];
+    p.tests.push({
+      id: 't3',
+      name: 'delete inside shadow roots',
+      flow: 'happy',
+      kind: 'regression',
+      parameters: [{ name: 'URL', values: { default: URL + 'shadow.html' } }],
+      steps: shadowSteps(),
+    });
+    p.settings.runPlan = [{ tests: [p.tests[0].id, 't2', 't3'] }];
     const saved = await saveProject(dir, Project.parse(p));
     const lines: string[] = [];
     const result = await new RobotRun({
@@ -211,7 +282,7 @@ describe('robot runner', async () => {
     }).run();
     if (!result.ok) console.log(lines.join('\n'));
     expect(result.results.map((r) => [r.testId, r.status])).toEqual(
-      expect.arrayContaining([[p.tests[0].id, 'PASS'], ['t2', 'PASS']]),
+      expect.arrayContaining([[p.tests[0].id, 'PASS'], ['t2', 'PASS'], ['t3', 'PASS']]),
     );
     expect(result.ok).toBe(true);
   }, 180_000);

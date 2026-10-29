@@ -236,14 +236,14 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     }
   }
 
-  /** Describe the parent element of the first match of `selector` (to widen a scope by one level). */
+  /** Describe the parent element (or shadow host) of the first match of `selector` (to widen a scope by one level). */
   async describeParent(selector: string): Promise<ElementDescriptor | undefined> {
     if (!this.page) return undefined;
     try {
       return await this.page
         .locator(selector)
         .first()
-        .evaluate((el) => (el.parentElement && el.parentElement !== document.documentElement ? (window as any).__joule?.describe(el.parentElement) : undefined), undefined, { timeout: 1000 });
+        .evaluate((el) => (window as any).__joule?.describeParent(el), undefined, { timeout: 1000 });
     } catch {
       return undefined;
     }
