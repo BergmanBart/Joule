@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -60,6 +61,53 @@ describe.runIf(python)('robot import', () => {
     expect(back.tests).toEqual(saved.tests);
     expect(back.keywords).toEqual(saved.keywords);
     expect(back.parameters).toEqual(saved.parameters);
+  });
+
+  function randomProject(): Project {
+    const p = project();
+    p.parameters[0].values.default = '${BASE}/case/${CASE_ID}';
+    p.parameters.push({ name: 'BASE', values: { default: 'https://app.example', PROD: 'https://prod.example' } });
+    p.parameters.push({ name: 'CASE_ID', kind: 'random', values: { default: 'C[0-9]{6}', ACC: 'A\\d{3}' } });
+    p.tests[0].parameters.push({ name: 'TITLE', values: { default: 'Case ${CASE_ID} by ${NICK}' } });
+    p.tests[0].parameters.push({ name: 'NICK', kind: 'random', values: { default: '(ann|bob)_[a-z]{3}' } });
+    return Project.parse(p);
+  }
+
+  it('round-trips random and combined parameters', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-random-'));
+    const saved = await saveProject(dir, randomProject());
+    const { project: back, warnings } = await importFolder(dir, python!, saved);
+    expect(warnings).toEqual([]);
+    expect(back.parameters).toEqual(saved.parameters);
+    expect(back.tests).toEqual(saved.tests);
+    // without the joule.json as well
+    const { project: fresh } = await importFolder(dir, python!);
+    expect(fresh.parameters.find((p) => p.name === 'CASE_ID')).toEqual(saved.parameters.find((p) => p.name === 'CASE_ID'));
+    expect(fresh.parameters.find((p) => p.name === 'URL')?.values.default).toBe('${BASE}/case/${CASE_ID}');
+    expect(fresh.tests[0].parameters.find((p) => p.name === 'NICK')).toMatchObject({ kind: 'random', values: { default: '(ann|bob)_[a-z]{3}' } });
+  });
+
+  it('draws matching values in the generated Python', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-py-'));
+    await saveProject(dir, randomProject());
+    const patterns = ['CASE-[A-Z]{3}\\d{4}', '[a-z0-9_]{5,10}', '[^a-z]{6}', '(foo|bar)-\\w+', '(?:ab)*c?', '(?P<id>[0-9]{2})x(?P=id)', '\\.\\*', 'a{2,}b+', '^\\d\\s\\D\\S\\W$', '[\\d.-]{4}', '[a]', 'x|y'];
+    const script = [
+      'import json, re, runpy, sys',
+      'sys.path.insert(0, sys.argv[1] + "/resources")',
+      'from JouleLib import random_from_regex',
+      'for p in json.loads(sys.argv[2]):',
+      '    for _ in range(100):',
+      '        v = random_from_regex(p)',
+      '        assert re.fullmatch(p, v), (p, v)',
+      'env = runpy.run_path(sys.argv[1] + "/env/TEST.py")',
+      'print(json.dumps({k: v for k, v in env.items() if not k.startswith("_")}))',
+    ].join('\n');
+    const out = await new Promise<string>((res, rej) =>
+      execFile(python!, ['-c', script, dir, JSON.stringify(patterns)], (err, stdout, stderr) => (err ? rej(new Error(stderr)) : res(stdout))),
+    );
+    const env = JSON.parse(out);
+    expect(env.CASE_ID).toMatch(/^C\d{6}$/);
+    expect(env.URL).toBe(`https://app.example/case/${env.CASE_ID}`);
   });
 
   it('detects hand edits and keeps unchanged steps', async () => {

@@ -19,8 +19,13 @@ export const ParameterValues = z.object({
 });
 export type ParameterValues = z.infer<typeof ParameterValues>;
 
+export const PARAMETER_KINDS = ['text', 'random'] as const;
+
+/** A text value may reference other parameters as ${NAME}; a random value is a regex the value is drawn from. */
 export const Parameter = z.object({
   name: z.string().min(1),
+  /** Missing means text. */
+  kind: z.enum(PARAMETER_KINDS).optional(),
   values: ParameterValues,
 });
 export type Parameter = z.infer<typeof Parameter>;

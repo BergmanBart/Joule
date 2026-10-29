@@ -171,6 +171,91 @@ describe('parameters', () => {
     expect(resolveParameters(p, undefined, 'PROD').find((x) => x.name === 'USERNAME')?.value).toBe('prod-user');
     expect(resolveParameters(p, undefined, 'DEV').find((x) => x.name === 'USERNAME')?.value).toBe('alice');
   });
+
+  function caseProject(): Project {
+    const p = newProject('Cases', 'https://example.com');
+    p.parameters[0].values.default = '${BASE}/case/${CASE_ID}';
+    p.parameters.push({ name: 'BASE', values: { default: 'https://app.example', PROD: 'https://prod.example' } });
+    p.parameters.push({ name: 'CASE_ID', kind: 'random', values: { default: 'C[0-9]{6}' } });
+    const t = p.tests[0];
+    t.id = 't1';
+    t.parameters.push({ name: 'TITLE', values: { default: 'Case ${CASE_ID} for ${USER}' } });
+    t.parameters.push({ name: 'USER', kind: 'random', values: { default: 'user_[a-z]{4}' } });
+    t.parameters.push({ name: 'GREETING', values: { default: 'Hello ${ENV_NAME}' } });
+    t.parameters.push({ name: 'ENV_NAME', values: { default: 'test' } });
+    return Project.parse(p);
+  }
+  const value = (r: ReturnType<typeof resolveParameters>, name: string) => r.find((x) => x.name === name)!.value;
+
+  it('combines parameters and draws random values on every resolve', () => {
+    const p = caseProject();
+    const a = resolveParameters(p, p.tests[0]);
+    expect(value(a, 'URL')).toMatch(/^https:\/\/app\.example\/case\/C\d{6}$/);
+    expect(value(a, 'TITLE')).toBe(`Case ${value(a, 'CASE_ID')} for ${value(a, 'USER')}`);
+    expect(value(a, 'USER')).toMatch(/^user_[a-z]{4}$/);
+    expect(value(resolveParameters(p, undefined, 'PROD'), 'URL')).toMatch(/^https:\/\/prod\.example\/case\//);
+    const urls = new Set(Array.from({ length: 10 }, () => value(resolveParameters(p), 'URL')));
+    expect(urls.size).toBeGreaterThan(1);
+  });
+
+  it('reuses drawn random values while their regex is unchanged', () => {
+    const p = caseProject();
+    const first = resolveParameters(p);
+    expect(value(resolveParameters(p, undefined, undefined, { reuse: first }), 'URL')).toBe(value(first, 'URL'));
+    p.parameters[2].values.default = 'D[0-9]{6}';
+    expect(value(resolveParameters(p, undefined, undefined, { reuse: first }), 'CASE_ID')).toMatch(/^D/);
+  });
+
+  it('only lets test parameters see test parameters', () => {
+    const p = caseProject();
+    p.tests[0].parameters.push({ name: 'BASE', values: { default: 'https://override.example' } });
+    const r = resolveParameters(p, p.tests[0]);
+    expect(value(r, 'URL')).toMatch(/^https:\/\/app\.example\//);
+  });
+
+  it('leaves circular references unresolved and reports them', () => {
+    const p = newProject('Loop', '${A}');
+    p.parameters.push({ name: 'A', values: { default: 'a${B}' } }, { name: 'B', values: { default: 'b${A}' } }, { name: 'C', values: { default: '${A}!' } });
+    const r = resolveParameters(p);
+    expect(r.find((x) => x.name === 'A')).toMatchObject({ value: 'a${B}', error: 'Circular reference: A → B → A' });
+    expect(r.find((x) => x.name === 'C')?.error).toBeUndefined();
+    expect(value(r, 'URL')).toBe('${A}');
+  });
+
+  it('reports an invalid regex', () => {
+    const p = newProject('Bad', 'x');
+    p.parameters.push({ name: 'R', kind: 'random', values: { default: '(abc' } });
+    expect(resolveParameters(p).find((x) => x.name === 'R')).toMatchObject({ value: '', error: expect.stringContaining('Invalid regex') });
+  });
+
+  it('generates Python and Robot code that draws and combines values', () => {
+    const files = generateRobotFiles(caseProject());
+    const env = files['env/TEST.py'];
+    expect(env).toContain('from JouleLib import random_from_regex as _random_from_regex');
+    expect(env).toContain('BASE = "https://app.example"\nCASE_ID = _random_from_regex("C[0-9]{6}")\nURL = BASE + "/case/" + CASE_ID\n');
+    expect(files['env/PROD.py']).toContain('BASE = "https://prod.example"');
+    expect(files['resources/JouleLib.py']).toContain('@keyword("Random From Regex")');
+    const robot = files['tests/Test1.robot'];
+    expect(robot).toContain('Suite Setup    Joule Suite Setup');
+    expect(robot).toContain('${GREETING}    Hello ${ENV_NAME}\n${ENV_NAME}    test\n');
+    expect(robot).not.toContain('${USER}    user_');
+    expect(robot).toContain(
+      [
+        'Joule Suite Setup',
+        '    [Documentation]    Joule parameters',
+        '    ${USER}=    Random From Regex    user_[a-z]{4}',
+        '    Set Suite Variable    ${USER}',
+        '    Set Suite Variable    ${TITLE}    Case ${CASE_ID} for ${USER}',
+        '    Open Joule Browser',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps the generated files unchanged for plain text parameters', () => {
+    const files = generateRobotFiles(sampleProject());
+    expect(files['env/TEST.py']).toBe('# Joule parameters for environment TEST. Generated; edit parameters in Joule.\nURL = "https://example.com"\nUSERNAME = "alice"\n');
+    expect(files['tests/Test1.robot']).toContain('Suite Setup    Open Joule Browser');
+  });
 });
 
 describe('step tree', () => {

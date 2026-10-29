@@ -62,7 +62,8 @@ export interface Requests {
   'view.count': [{ selector: string }, { count: number; error?: string }];
   'view.pickConstraint': [{ constraint: { selector: string; relation: 'ancestor' | 'descendant' } | null }, { found: boolean }];
   'view.describeParent': [{ selector: string }, { descriptor?: ElementDescriptor }];
-  'run.live': [{ project: Project; testId: string; stepIds?: string[]; fromStart: boolean }, {}];
+  /** `params`: resolved parameter values to use (the ones the browser view shows); resolved fresh when missing. */
+  'run.live': [{ project: Project; testId: string; stepIds?: string[]; fromStart: boolean; params?: Record<string, string> }, {}];
   'run.robot': [{ project: Project; testIds?: string[]; headless?: boolean; parallel?: boolean }, {}];
   'run.continue': [{}, {}];
   'run.stop': [{}, {}];

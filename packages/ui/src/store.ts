@@ -26,6 +26,7 @@ import {
   type Keyword,
   type Locator,
   type Project,
+  type ResolvedParameter,
   type RobotTestResult,
   type Step,
   type Test,
@@ -94,6 +95,8 @@ interface State {
   searchCollapsed: boolean;
 
   view: { status: 'idle' | 'starting' | 'ready' | 'closed' | 'error'; url: string; message?: string; mode: 'record' | 'interact' };
+  /** Parameters as last resolved for the browser view; its random values are kept until the next start. */
+  drawn: ResolvedParameter[];
   run: RunState;
   outputOpen: boolean;
   modal: Modal;
@@ -117,6 +120,7 @@ export const useStore = create<State>(() => ({
   pickTarget: null,
   searchCollapsed: readFlag('joule.searchCollapsed'),
   view: { status: 'idle', url: '', mode: 'record' },
+  drawn: [],
   run: emptyRun,
   outputOpen: false,
   modal: null,
@@ -207,18 +211,33 @@ export async function openProject(dir: string) {
   set({ settings: { ...get().settings, recent: [r.dir, ...get().settings.recent.filter((d) => d !== r.dir)] } });
 }
 
+const urlOf = (params: ResolvedParameter[]) => params.find((p) => p.name === 'URL')?.value || 'about:blank';
+
+/** Parameter values matching the page in the browser view: random values are kept from the last start. */
+export function currentParams(): ResolvedParameter[] {
+  const { project, drawn } = get();
+  return project ? resolveParameters(project, currentTest(), undefined, { reuse: drawn }) : [];
+}
+
 export function startUrl(): string {
+  return urlOf(currentParams());
+}
+
+/** Draw new random values and return the start URL to open with them. */
+export function newStart(): ResolvedParameter[] {
   const { project } = get();
-  if (!project) return 'about:blank';
-  return resolveParameters(project, currentTest()).find((p) => p.name === 'URL')?.value || 'about:blank';
+  const drawn = project ? resolveParameters(project, currentTest()) : [];
+  set({ drawn });
+  return drawn;
 }
 
 export async function startView() {
   const { project } = get();
   if (!project) return;
-  set({ view: { ...get().view, status: 'starting', url: startUrl() } });
+  const url = urlOf(newStart());
+  set({ view: { ...get().view, status: 'starting', url } });
   const s = project.settings;
-  await call(api.request('view.start', { browser: s.browser, width: s.width, height: s.height, url: startUrl() }));
+  await call(api.request('view.start', { browser: s.browser, width: s.width, height: s.height, url }));
   await api.request('view.mode', { mode: get().view.mode }).catch(() => {});
 }
 
@@ -291,11 +310,21 @@ export function editSteps(fn: (steps: Step[]) => Step[]) {
   });
 }
 
+/** Start URL with random parts drawn the same way every time, to tell whether the URL itself changed. */
+function stableStartUrl(): string {
+  const { project } = get();
+  return project ? urlOf(resolveParameters(project, currentTest(), undefined, { random: () => 0 })) : 'about:blank';
+}
+
 export function selectContainer(c: Container) {
-  const before = startUrl();
+  const before = stableStartUrl();
   set({ current: c, selected: [], detail: undefined, anchor: undefined, pickTarget: null });
-  const after = startUrl();
-  if (before !== after) void api.request('view.navigate', { url: after });
+  if (before !== stableStartUrl()) goHome();
+}
+
+/** Open the start URL with newly drawn random values. */
+export function goHome() {
+  void api.request('view.navigate', { url: urlOf(newStart()) });
 }
 
 export function editTest(id: string, fn: (t: Test) => Test) {
@@ -618,7 +647,9 @@ export function runLive(opts: { stepIds?: string[]; fromStart: boolean }) {
   const { project, current } = get();
   if (!project || !current) return;
   set({ run: { ...emptyRun, kind: 'live', running: true, testIds: [current.id] } });
-  void call(api.request('run.live', { project, testId: current.id, stepIds: opts.stepIds, fromStart: opts.fromStart }));
+  const resolved = opts.fromStart ? newStart() : currentParams();
+  const params = Object.fromEntries(resolved.map((p) => [p.name, p.value]));
+  void call(api.request('run.live', { project, testId: current.id, stepIds: opts.stepIds, fromStart: opts.fromStart, params }));
 }
 
 export function runRobot(opts: { testIds?: string[]; headless?: boolean }) {

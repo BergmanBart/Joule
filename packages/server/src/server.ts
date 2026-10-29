@@ -227,7 +227,7 @@ export async function startServer(opts: ServerOptions) {
     'view.pickConstraint': ({ constraint }) => session.setPickConstraint(constraint),
     'view.describeParent': async ({ selector }) => ({ descriptor: await session.describeParent(selector) }),
 
-    'run.live': async ({ project: p, testId, stepIds, fromStart }) => {
+    'run.live': async ({ project: p, testId, stepIds, fromStart, params: given }) => {
       if (liveAbort || robotRun) throw new Error('A run is already in progress');
       const dir = requireProject();
       // A test, or a reusable keyword being edited on its own.
@@ -235,7 +235,7 @@ export async function startServer(opts: ServerOptions) {
       const test = asTest ?? p.keywords.find((k) => k.id === testId);
       if (!test) throw new Error('Unknown test');
       if (!session.isOpen || !session.page) throw new Error('The browser view is not running');
-      const params = Object.fromEntries(resolveParameters(p, asTest).map((x) => [x.name, x.value]));
+      const params = given ?? Object.fromEntries(resolveParameters(p, asTest).map((x) => [x.name, x.value]));
       const steps = stepIds ? pickSteps(test.steps, new Set(stepIds)) : test.steps;
       const abort = new AbortController();
       liveAbort = abort;

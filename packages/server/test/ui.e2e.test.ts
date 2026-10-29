@@ -305,4 +305,31 @@ describe.runIf(existsSync(join(UI, 'index.html')))('Joule app', () => {
       .poll(() => readFile(join(dir, 'tests', 'Test3.robot'), 'utf8').catch(() => ''), { timeout: 5000 })
       .toMatch(/Resource    \.\.\/custom_keywords\/shop\/cart\.resource\n[\s\S]*\n    Add To Cart    product=Pear    size=large\n/);
   }, 60_000);
+
+  it('opens a new random start URL on every Home click', async () => {
+    await page.getByRole('button', { name: 'Parameters' }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'Project parameters' });
+    await dialog.getByRole('button', { name: 'Add random parameter' }).click();
+    await visible(dialog.getByText(/^e\.g\. [A-Z0-9]{8}$/));
+    const url = dialog.locator('tr', { hasText: 'URL' }).locator('input.input').first();
+    await url.fill(`${SITE}?case=\${RANDOM_1}`);
+    await url.press('Enter');
+    await visible(dialog.getByText(new RegExp(`^= ${SITE.replace(/[.]/g, '\\.')}\\?case=[A-Z0-9]{8}$`)));
+    await shot('14-random-parameter');
+    await page.keyboard.press('Escape');
+
+    const seen = new Set<string>();
+    for (let i = 0; i < 3; i++) {
+      const before = (await page.locator('.urlbar span').textContent()) ?? '';
+      await page.locator('button[title^="Go to the start URL"]').click();
+      await expect.poll(() => page.locator('.urlbar span').textContent(), { timeout: 10_000 }).not.toBe(before);
+      const now = (await page.locator('.urlbar span').textContent()) ?? '';
+      expect(now).toMatch(/\?case=[A-Z0-9]{8}$/);
+      seen.add(now);
+    }
+    expect(seen.size).toBe(3);
+    await expect
+      .poll(() => readFile(join(dir, 'env', 'TEST.py'), 'utf8').catch(() => ''), { timeout: 5000 })
+      .toMatch(/RANDOM_1 = _random_from_regex\("\[A-Z0-9\]\{8\}"\)\nURL = "http:\/\/127\.0\.0\.1:\d+\/\?case=" \+ RANDOM_1\n/);
+  }, 60_000);
 });

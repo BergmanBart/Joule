@@ -256,6 +256,7 @@ describe('robot runner', async () => {
     const p = newProject('Fixture', URL);
     p.settings.browser = 'msedge';
     p.parameters.push({ name: 'USERNAME', values: { default: 'alice', PROD: 'carol' } });
+    p.parameters.push({ name: 'RUN_ID', kind: 'random', values: { default: '[a-z]{6}' } });
     p.tests[0].steps = loginSteps();
     const second = { ...structuredClone(p.tests[0]), id: 't2', name: 'login as prod user' };
     p.tests.push(second);
@@ -264,7 +265,11 @@ describe('robot runner', async () => {
       name: 'delete inside shadow roots',
       flow: 'happy',
       kind: 'regression',
-      parameters: [{ name: 'URL', values: { default: URL + 'shadow.html' } }],
+      // a random case id in the start URL, drawn by the generated suite setup
+      parameters: [
+        { name: 'CASE', kind: 'random', values: { default: '[A-Z]{5}' } },
+        { name: 'URL', values: { default: URL + 'shadow.html?case=${CASE}&run=${RUN_ID}' } },
+      ],
       steps: shadowSteps(),
     });
     p.settings.runPlan = [{ tests: [p.tests[0].id, 't2', 't3'] }];

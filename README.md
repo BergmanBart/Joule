@@ -63,6 +63,9 @@ everything into a `.venv` in the project folder. Python is looked up in this ord
   ▶ next to a test, or **Run all**, runs Robot Framework itself; output, PASS/FAIL and the log are shown at the bottom.
 - **Parameters** (top bar): name + a value per environment (DEV/TEST/ACC/PROD); `URL` is required. Tests can
   override parameters (shown with a warning) in *Test settings*, along with happy/unhappy and smoke/regression.
+  A value can combine other parameters (`${BASE_URL}/case/${CASE_ID}`); project parameters only see project
+  parameters, test parameters see both. A **Regex** parameter gets a random value matching its pattern, drawn
+  again on every Home click, browser start, run from the start and Robot run (one value per run).
 - **Project settings**: browser (Chrome, Edge, Firefox), headless, resolution, timeout, retries, environment,
   screenshot folder and the **run plan** (stages run in series, tests within a stage in parallel).
 

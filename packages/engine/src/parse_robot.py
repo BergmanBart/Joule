@@ -71,22 +71,55 @@ def parse_file(path, root):
     return result
 
 
+def text_of(node):
+    """Rebuild "a" + NAME + "b" (as Joule generates combined parameters) into "a${NAME}b"."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = text_of(node.left), text_of(node.right)
+        return None if left is None or right is None else left + right
+    if isinstance(node, ast.Name):
+        return "${" + node.id + "}"
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def random_pattern(node):
+    """The regex of a _random_from_regex("...") call (a random parameter), else None."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_random_from_regex"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    return None
+
+
 def parse_env(path):
-    """Read simple NAME = "literal" assignments without executing the file."""
-    values = {}
+    """Read NAME = "literal" / combined / random assignments without executing the file."""
+    values, randoms = {}, {}
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except Exception:
-        return values
+        return values, randoms
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name.startswith("_"):
+                continue
+            pattern = random_pattern(node.value)
+            if pattern is not None:
+                randoms[name] = pattern
+                continue
             try:
                 value = ast.literal_eval(node.value)
             except Exception:
-                continue
-            if isinstance(value, (str, int, float, bool)) and not node.targets[0].id.startswith("_"):
-                values[node.targets[0].id] = str(value)
-    return values
+                value = text_of(node.value)
+            if isinstance(value, (str, int, float, bool)):
+                values[name] = str(value)
+    return values, randoms
 
 
 def robot_files(folder):
@@ -136,12 +169,12 @@ def main():
             files.append(parse_file(path, root))
         except Exception as e:  # keep going; report per file
             files.append({"file": path.relative_to(root).as_posix(), "error": str(e)})
-    env = {}
+    env, env_random = {}, {}
     env_dir = root / "env"
     if env_dir.is_dir():
         for path in env_dir.glob("*.py"):
-            env[path.stem] = parse_env(path)
-    sys.stdout.write(json.dumps({"files": files, "env": env, "custom": parse_custom(root)}))
+            env[path.stem], env_random[path.stem] = parse_env(path)
+    sys.stdout.write(json.dumps({"files": files, "env": env, "envRandom": env_random, "custom": parse_custom(root)}))
 
 
 if __name__ == "__main__":

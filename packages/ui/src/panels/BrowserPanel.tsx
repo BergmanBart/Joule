@@ -1,8 +1,8 @@
 import { ArrowLeft, Circle, Crosshair, Globe, Hand, Home, Loader2, Play, RotateCw, X } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
-import { buildSelector, findStep, interpolate, numberSteps, resolveParameters, scopeSelector, walk, type HighlightRequest, type Locator, type Step } from '@joule/core';
+import { buildSelector, findStep, interpolate, numberSteps, scopeSelector, walk, type HighlightRequest, type Locator, type Step } from '@joule/core';
 import { api } from '../api';
-import { containerSteps, currentTest, effectiveSelection, startUrl, startView, toast, useStore, type PickTarget } from '../store';
+import { containerSteps, currentParams, effectiveSelection, goHome, startUrl, startView, toast, useStore, type PickTarget } from '../store';
 
 /** Locator a step points at in the page (element, element-wait or if-condition). */
 export function stepLocator(s: Step): Locator | undefined {
@@ -12,14 +12,12 @@ export function stepLocator(s: Step): Locator | undefined {
   return undefined;
 }
 
-/** Selector as the page sees it: ${params} replaced with their current values. */
+/** Selector as the page sees it: ${params} replaced with their current values (random ones as drawn for the open page). */
 export function useParams(): Record<string, string> {
   const project = useStore((s) => s.project);
   const current = useStore((s) => s.current);
-  return useMemo(() => {
-    if (!project) return {};
-    return Object.fromEntries(resolveParameters(project, currentTest()).map((p) => [p.name, p.value]));
-  }, [project, current]);
+  const drawn = useStore((s) => s.drawn);
+  return useMemo(() => Object.fromEntries(currentParams().map((p) => [p.name, p.value])), [project, current, drawn]);
 }
 
 function useHighlightSync() {
@@ -150,7 +148,7 @@ export function BrowserPanel() {
         <button className="icon-btn" title="Reload" onClick={() => api.request('view.reload', {})}>
           <RotateCw size={15} />
         </button>
-        <button className="icon-btn" title="Go to the start URL (${URL})" onClick={() => api.request('view.navigate', { url: startUrl() })}>
+        <button className="icon-btn" title="Go to the start URL (${URL}); random parameters get new values" onClick={goHome}>
           <Home size={15} />
         </button>
         <div className="urlbar" title={view.url}>

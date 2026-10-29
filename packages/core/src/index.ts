@@ -1,6 +1,7 @@
 export * from './model';
 export * from './ids';
 export * from './params';
+export * from './random';
 export * from './selector';
 export * from './steps';
 export * from './factory';
