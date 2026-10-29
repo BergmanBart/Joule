@@ -1,4 +1,5 @@
 /** WebSocket protocol between the UI and the server. Shared so both sides stay in sync. */
+import type { CustomKeyword } from './custom';
 import type { BrowserName, ElementDescriptor, Environment, Project } from './model';
 
 export interface AppSettings {
@@ -48,6 +49,8 @@ export interface Requests {
   'project.open': [{ dir: string }, { dir: string; project: Project; externalEdits: string[]; imported: boolean; warnings: string[] }];
   'project.save': [{ project: Project }, Project];
   'project.reimport': [{}, { project: Project; warnings: string[] }];
+  /** Keywords in <project>/custom_keywords. */
+  'keywords.scan': [{}, { keywords: CustomKeyword[]; warnings: string[] }];
   'view.start': [{ browser: BrowserName; width: number; height: number; url: string }, {}];
   'view.navigate': [{ url: string }, {}];
   'view.reload': [{}, {}];

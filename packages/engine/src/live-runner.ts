@@ -226,7 +226,8 @@ export class LiveRunner {
         return this.steps(kw.steps, depth + 1);
       }
       case 'raw':
-        return 'skip'; // raw Robot lines only run via Robot Framework
+      case 'customCall':
+        return 'skip'; // raw Robot lines and custom keywords only run via Robot Framework
       case 'group':
         return this.steps(step.steps, depth + 1);
       case 'if': {

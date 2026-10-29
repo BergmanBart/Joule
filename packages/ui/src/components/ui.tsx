@@ -54,6 +54,28 @@ export function Menu({ button, children, align = 'left', up }: { button: (open: 
   );
 }
 
+/** Right-click menu at a viewport position; closes on outside click or Escape. */
+export function ContextMenu({ x, y, onClose, children }: { x: number; y: number; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', onClose);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', onClose);
+    };
+  }, [onClose]);
+  return (
+    <div className="menu" ref={ref} style={{ position: 'fixed', left: Math.min(x, window.innerWidth - 230), top: Math.min(y, window.innerHeight - 60) }} onContextMenu={(e) => e.preventDefault()}>
+      {children}
+    </div>
+  );
+}
+
 export function MenuItem({ icon, children, onClick, kbd, disabled }: { icon?: ReactNode; children: ReactNode; onClick: () => void; kbd?: string; disabled?: boolean }) {
   return (
     <button className="item" onClick={onClick} disabled={disabled}>

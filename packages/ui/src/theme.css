@@ -100,7 +100,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ---------- menus ---------- */
 .menu-wrap { position: relative; }
-.menu { position: absolute; z-index: 50; min-width: 220px; padding: 4px; background: var(--bg-3); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+.menu { position: absolute; z-index: 50; min-width: 220px; max-height: calc(100vh - 140px); overflow-y: auto; padding: 4px; background: var(--bg-3); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
 .menu .item { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; cursor: pointer; text-align: left; color: var(--text); }
 .menu .item:hover:not(:disabled) { background: var(--bg-active); }
 .menu .item:disabled { opacity: 0.4; cursor: default; }
@@ -234,3 +234,13 @@ a.btn { text-decoration: none; color: inherit; }
 .scope .prop-list { margin-bottom: 6px; }
 .scope-head { margin-bottom: 4px; gap: 2px; }
 .scope-hint { font-size: 12px; margin-bottom: 6px; }
+
+/* ---------- custom keywords ---------- */
+.custom-tree .list-item { height: 28px; gap: 6px; }
+.custom-tree .tree-folder .name { color: var(--text-2); }
+.kw-doc { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: -6px 0 8px; padding: 8px 10px; border-left: 2px solid #38bdf8; background: var(--bg-3); border-radius: 0 var(--radius) var(--radius) 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.kw-source { margin: 0 0 14px; font-size: 11px; overflow-wrap: anywhere; }
+.field-hint.err { margin-top: 4px; font-size: 11.5px; color: var(--danger); }
+/* argument names and defaults are shown as written in the keyword file */
+.field > label.arg-label { text-transform: none; letter-spacing: 0; font-size: 12px; }
+.field > label.arg-label .muted { font-weight: 400; font-size: 11px; }

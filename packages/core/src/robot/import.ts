@@ -2,6 +2,7 @@
  * Turn parsed Robot Framework files (see engine/parse_robot.py) back into a Joule project.
  * Known Browser library keywords become steps; anything else is kept verbatim as a raw step.
  */
+import { customKeywordsFrom, type CustomKeyword, type ParsedCustomFile } from '../custom';
 import { newId } from '../ids';
 import { ENVIRONMENTS, Project as ProjectSchema } from '../model';
 import type { Action, Assertion, AssertProperty, Keyword, Locator, Operator, Parameter, Project, Step, Test } from '../model';
@@ -9,7 +10,7 @@ import { OPERATORS } from '../model';
 import { parameterValue } from '../params';
 import { walk } from '../steps';
 import { unarg, row } from './escape';
-import { normalizeRow, sharedKeywordNames, stepSignature } from './generate';
+import { normalizeRow, sharedKeywordNames, stepSignature, usedCustomNames } from './generate';
 
 export interface ParsedCall {
   kind: 'call';
@@ -41,6 +42,8 @@ export interface ParsedFile {
 
 export interface ParsedFolder {
   files: ParsedFile[];
+  /** Keyword files in custom_keywords/ (not part of `files`). */
+  custom?: ParsedCustomFile[];
   env: Record<string, Record<string, string>>;
 }
 
@@ -134,6 +137,8 @@ interface Scope {
   local: Map<string, { name: string; body: ParsedItem[]; doc?: string }>;
   /** normalized name → shared keyword id */
   shared: Map<string, string>;
+  /** normalized name → keyword from custom_keywords/ */
+  custom: Map<string, CustomKeyword>;
   /** signature → existing steps, to keep ids and element details of unchanged steps */
   pool: Map<string, Step[]>;
   warnings: string[];
@@ -155,6 +160,28 @@ function rawStep(lines: string[]): Step {
 function docOf(body: ParsedItem[]): string | undefined {
   const d = body.find((b) => b.kind === 'doc');
   return d && d.kind === 'doc' ? d.value : undefined;
+}
+
+/** A call of a custom keyword with arguments Joule can edit (by name, or positional in order), else undefined. */
+function customCallFrom(c: ParsedCall, def: CustomKeyword): Step | undefined {
+  const editable = new Set(def.args.filter((a) => a.kind === 'arg' || a.kind === 'named').map((a) => a.name));
+  const positional = def.args.filter((a) => a.kind === 'arg');
+  const hasKwargs = def.args.some((a) => a.kind === 'kwargs');
+  const args: Record<string, string> = {};
+  let named = false;
+  for (const cell of c.args) {
+    const m = /^([A-Za-z_][\w ]*)=(.*)$/s.exec(cell);
+    if (m && editable.has(m[1])) {
+      args[m[1]] = unarg(m[2]);
+      named = true;
+      continue;
+    }
+    // positional after named, more values than arguments, or a free name=value for &{kwargs}
+    const a = positional[Object.keys(args).length];
+    if (named || !a || (m && hasKwargs)) return undefined;
+    args[a.name] = unarg(cell);
+  }
+  return { id: newId('s'), name: '', type: 'customCall', keyword: def.name, source: def.source, args };
 }
 
 function convertCall(c: ParsedCall, scope: Scope): Step | undefined {
@@ -207,6 +234,9 @@ function convertCall(c: ParsedCall, scope: Scope): Step | undefined {
       const steps = convertBody(local.body, { ...scope, depth: scope.depth + 1 });
       return { id, name: local.name, type: 'group', collapsed: false, steps };
     }
+    const custom = scope.custom.get(kw);
+    const call = custom && customCallFrom(c, custom);
+    if (call) return fromPool(scope, sig, call);
   }
   return rawStep(c.lines);
 }
@@ -274,7 +304,8 @@ export function importParsed(parsed: ParsedFolder, name: string, existing?: Proj
   const warnings: string[] = [];
   for (const f of parsed.files) if (f.error) warnings.push(`${f.file}: ${f.error}`);
   const files = parsed.files.filter((f) => !f.error && !HELPER_RESOURCES.has(f.file));
-  const oldKeywordNames = existing ? sharedKeywordNames(existing.keywords) : new Map<string, string>();
+  const oldKeywordNames = existing ? sharedKeywordNames(existing.keywords, usedCustomNames(existing)) : new Map<string, string>();
+  const custom = new Map(customKeywordsFrom(parsed.custom ?? []).keywords.map((k) => [norm(k.name), k]));
 
   // Shared keywords: everything defined in .resource files.
   const sharedDefs = files.filter((f) => f.file.endsWith('.resource')).flatMap((f) => f.keywords.map((k) => ({ file: f, k })));
@@ -297,6 +328,7 @@ export function importParsed(parsed: ParsedFolder, name: string, existing?: Proj
     const scope: Scope = {
       local: new Map(file.keywords.filter((x) => groupNames.has(norm(x.name))).map((x) => [norm(x.name), x])),
       shared,
+      custom,
       pool: signaturePool(old?.steps ?? [], oldKeywordNames),
       warnings,
       depth: 0,
@@ -317,7 +349,7 @@ export function importParsed(parsed: ParsedFolder, name: string, existing?: Proj
       const id = /^(?:Joule|UITester) test (\S+)/.exec(doc)?.[1] ?? newId('t');
       const old = existing?.tests.find((x) => x.id === id);
       const tags = t.body.flatMap((b) => (b.kind === 'tags' ? b.values : [])).map((x) => x.toLowerCase());
-      const scope: Scope = { local, shared, pool: signaturePool(old?.steps ?? [], oldKeywordNames), warnings, depth: 0 };
+      const scope: Scope = { local, shared, custom, pool: signaturePool(old?.steps ?? [], oldKeywordNames), warnings, depth: 0 };
       const steps = convertBody(t.body, scope);
       if (!firstUrl) {
         const open = t.body.find((b): b is ParsedCall => b.kind === 'call' && ['newpage', 'goto', 'openbrowser'].includes(norm(b.keyword)));

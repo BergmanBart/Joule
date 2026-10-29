@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   arg,
   buildSelector,
+  customKeywordsFrom,
   defaultHasUse,
   defaultScopeUse,
   describeStep,
   effectiveRunPlan,
+  findCustomKeyword,
   generateRobotFiles,
+  isRequired,
   moveSteps,
+  newCustomCall,
   newProject,
   numberSteps,
+  parseArguments,
   pickSteps,
   Project,
   resolveParameters,
@@ -264,5 +269,59 @@ describe('robot generation', () => {
     p.settings.runPlan = [{ tests: [p.tests[0].id, 't3'] }];
     expect(effectiveRunPlan(p)).toEqual([[p.tests[0].id, 't3'], ['t2']]);
     expect(generateRobotFiles(p)['run_plan.txt']).toBe('--suite Tests.Test1\n--suite Tests.Search\n#WAIT\n--suite Tests.Checkout Flow\n');
+  });
+});
+
+describe('custom keywords', () => {
+  it('parses [Arguments] with defaults, type hints and options', () => {
+    const args = parseArguments([
+      '${user}',
+      "${mode: Literal['fast', \"slow\"]}=fast",
+      '${remember: bool}=False',
+      '${count: int}',
+      "${size: Literal['s', 'm'] | None}",
+      '@{rest}',
+      '${only}=x',
+      '&{extra}',
+    ]);
+    expect(args).toEqual([
+      { name: 'user', kind: 'arg' },
+      { name: 'mode', kind: 'arg', default: 'fast', type: "Literal['fast', \"slow\"]", options: ['fast', 'slow'] },
+      { name: 'remember', kind: 'arg', default: 'False', type: 'bool', options: ['True', 'False'] },
+      { name: 'count', kind: 'arg', type: 'int' },
+      { name: 'size', kind: 'arg', type: "Literal['s', 'm'] | None", options: ['s', 'm'], optional: true },
+      { name: 'rest', kind: 'varargs' },
+      { name: 'only', kind: 'named', default: 'x' },
+      { name: 'extra', kind: 'kwargs' },
+    ]);
+    expect(parseArguments(['@{}', '${a}'])).toEqual([{ name: 'a', kind: 'named' }]);
+    expect(args.map(isRequired)).toEqual([true, false, false, true, false, false, false, false]);
+  });
+
+  it('starts a call with the required arguments and finds moved files by name', () => {
+    const { keywords } = customKeywordsFrom([
+      { file: 'custom_keywords/sub/login.resource', keywords: [{ name: 'Login As', doc: 'Logs in.', args: ['${user}', "${mode: Literal['a', 'b']}", '${x}=1'] }] },
+    ]);
+    const step = newCustomCall(keywords[0]);
+    expect(step).toMatchObject({ type: 'customCall', keyword: 'Login As', source: 'custom_keywords/sub/login.resource', args: { user: '', mode: 'a' } });
+    expect(findCustomKeyword(keywords, { keyword: 'login_as', source: 'custom_keywords/old.resource' })).toBe(keywords[0]);
+    expect(describeStep({ ...step, args: { user: 'bob' } })).toBe('Login As (user=bob)');
+  });
+
+  it('imports the keyword file and passes arguments by name', () => {
+    const p = sampleProject();
+    p.tests[0].steps = [
+      { id: 'c', name: '', type: 'customCall', keyword: 'Login As', source: 'custom_keywords/login.resource', args: { user: '${USERNAME}', mode: 'fast', note: '' } },
+      { id: 'g', name: 'Login As', type: 'group', collapsed: false, steps: [] },
+    ];
+    p.keywords[0].name = 'login as';
+    const files = generateRobotFiles(p);
+    const robot = files['tests/Test1.robot'];
+    expect(robot).toContain('Resource    ../resources/keywords.resource\nResource    ../custom_keywords/login.resource\n');
+    expect(robot).toContain('\n    Login As    user=${USERNAME}    mode=fast    note=${EMPTY}\n');
+    // a group or shared keyword with the same name is renamed so it does not shadow the custom keyword
+    expect(robot).toContain('\n    Login As Steps 2\n');
+    expect(files['resources/keywords.resource']).toContain('\nlogin as Steps\n');
+    expect(files['resources/keywords.resource']).not.toContain('custom_keywords');
   });
 });

@@ -27,6 +27,7 @@ import {
   installDeps,
   LiveRunner,
   RobotRun,
+  scanCustomKeywords,
   timestamp,
   findPython,
   type StepEvent,
@@ -199,6 +200,7 @@ export async function startServer(opts: ServerOptions) {
       project = r.project;
       return r;
     },
+    'keywords.scan': async () => scanCustomKeywords(requireProject(), await python()),
 
     'view.start': async ({ browser, width, height, url }) => {
       emit('view.status', { state: 'starting' });

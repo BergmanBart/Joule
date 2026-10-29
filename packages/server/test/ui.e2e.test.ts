@@ -3,7 +3,7 @@
  * Run `npm run build -w @joule/ui` first. Set SHOTS=<dir> to keep screenshots.
  */
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -268,5 +268,41 @@ describe.runIf(existsSync(join(UI, 'index.html')))('Joule app', () => {
     await expect
       .poll(() => readFile(join(dir, 'tests', 'Test3.robot'), 'utf8').catch(() => ''), { timeout: 5000 })
       .toContain('Click    css=li:has(span:text-is("Pear")) >> css=button:text-is("Delete")');
+  }, 60_000);
+
+  it('rescans custom keywords and adds one with its docs and a dropdown for Literal options', async () => {
+    await count(page.locator('.custom-tree'), 0);
+    await mkdir(join(dir, 'custom_keywords', 'shop'), { recursive: true });
+    await writeFile(
+      join(dir, 'custom_keywords', 'shop', 'cart.resource'),
+      [
+        '*** Keywords ***',
+        'Add To Cart',
+        '    [Documentation]    Puts a product in the cart.',
+        "    [Arguments]    ${product}    ${size: Literal['small', 'large']}=small",
+        '    Log    ${product} ${size}',
+        '',
+      ].join('\n'),
+    );
+    await page.locator('.section-label', { hasText: 'Reusable keywords' }).click({ button: 'right' });
+    await page.getByRole('button', { name: 'Rescan custom keywords' }).click();
+    await visible(page.locator('.custom-tree').getByText('Custom Keywords'));
+    await visible(page.locator('.custom-tree').getByText('cart'));
+    await shot('13-custom-keywords');
+
+    await page.locator('.custom-tree .custom-kw', { hasText: 'Add To Cart' }).click();
+    await text(page.locator('.step-row.detail .step-label'), /Add To Cart/);
+    await visible(page.locator('.details .kw-doc').getByText('Puts a product in the cart.'));
+    const size = page.locator('.details .field', { hasText: 'size' }).locator('select');
+    await expect.poll(() => size.locator('option').allTextContents()).toEqual(['(default: small)', 'small', 'large']);
+    await size.selectOption('large');
+    const product = page.locator('.details .field', { hasText: 'product' }).locator('input.input');
+    await product.fill('Pear');
+    await product.press('Enter');
+    await shot('14-custom-keyword-details');
+
+    await expect
+      .poll(() => readFile(join(dir, 'tests', 'Test3.robot'), 'utf8').catch(() => ''), { timeout: 5000 })
+      .toMatch(/Resource    \.\.\/custom_keywords\/shop\/cart\.resource\n[\s\S]*\n    Add To Cart    product=Pear    size=large\n/);
   }, 60_000);
 });

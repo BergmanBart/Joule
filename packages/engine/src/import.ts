@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { importParsed, type ParsedFolder, type Project } from '@joule/core';
+import { customKeywordsFrom, importParsed, type CustomKeyword, type ParsedCustomFile, type ParsedFolder, type Project } from '@joule/core';
 import { exec } from './python';
 
 const PARSER = fileURLToPath(new URL('./parse_robot.py', import.meta.url));
@@ -15,4 +15,11 @@ export async function parseFolder(dir: string, python: string): Promise<ParsedFo
 /** Open a folder of Robot files as a Joule project (best effort), or re-read a Joule project edited by hand. */
 export async function importFolder(dir: string, python: string, existing?: Project): Promise<{ project: Project; warnings: string[] }> {
   return importParsed(await parseFolder(dir, python), basename(dir), existing);
+}
+
+/** Keywords in <dir>/custom_keywords, with warnings for files Robot Framework could not parse. */
+export async function scanCustomKeywords(dir: string, python: string): Promise<{ keywords: CustomKeyword[]; warnings: string[] }> {
+  const r = await exec(python, [PARSER, '--custom', dir]);
+  if (r.code !== 0) throw new Error(`Could not scan custom keywords: ${(r.stderr || r.stdout).trim().split('\n').pop()}`);
+  return customKeywordsFrom((JSON.parse(r.stdout) as { custom: ParsedCustomFile[] }).custom);
 }

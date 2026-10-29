@@ -9,6 +9,7 @@ import {
   insertSteps,
   moveSteps,
   newId,
+  newCustomCall,
   newKeyword,
   newStep,
   newTest,
@@ -20,6 +21,7 @@ import {
   walk,
   type AppSettings,
   type BaseLocator,
+  type CustomKeyword,
   type ElementDescriptor,
   type Keyword,
   type Locator,
@@ -80,6 +82,8 @@ interface State {
   warnings: string[];
   past: Project[];
   future: Project[];
+  /** Keywords found in <project>/custom_keywords (scanned, not saved in the project). */
+  customKeywords: CustomKeyword[];
 
   current?: Container;
   selected: string[];
@@ -108,6 +112,7 @@ export const useStore = create<State>(() => ({
   warnings: [],
   past: [],
   future: [],
+  customKeywords: [],
   selected: [],
   pickTarget: null,
   searchCollapsed: readFlag('joule.searchCollapsed'),
@@ -165,6 +170,7 @@ export function loadProject(dir: string, project: Project, extra: { externalEdit
     warnings: extra.warnings ?? [],
     past: [],
     future: [],
+    customKeywords: [],
     current: first ? { kind: 'test', id: first.id } : undefined,
     selected: [],
     detail: undefined,
@@ -173,6 +179,21 @@ export function loadProject(dir: string, project: Project, extra: { externalEdit
   });
   document.title = `${project.name} · Joule`;
   void startView();
+  void scanCustomKeywords(false);
+}
+
+/** Read the keyword files in custom_keywords/. Only a manual rescan reports missing Python or Robot Framework. */
+export async function scanCustomKeywords(manual = true) {
+  const dir = get().projectDir;
+  try {
+    const r = await api.request('keywords.scan', {});
+    if (get().projectDir !== dir) return;
+    set({ customKeywords: r.keywords });
+    if (r.warnings.length) toast(`Some custom keyword files could not be read: ${r.warnings.join('; ')}`, 'error');
+    else if (manual) toast(r.keywords.length ? `Found ${r.keywords.length} custom keyword(s)` : 'No custom keywords found in custom_keywords/');
+  } catch (e) {
+    if (manual) toast((e as Error).message, 'error');
+  }
 }
 
 export async function openProject(dir: string) {
@@ -397,6 +418,11 @@ export function addSteps(items: Step[], select = true) {
   const at = insertionPoint(steps);
   editSteps((s) => insertSteps(s, at.target, at.index, items));
   if (select && items.length) set({ selected: items.map((i) => i.id), detail: items[items.length - 1].id, anchor: items[0].id });
+}
+
+export function addCustomCall(def: CustomKeyword) {
+  if (!get().current) return;
+  addSteps([newCustomCall(def)]);
 }
 
 export function addStepOfType(type: Parameters<typeof newStep>[0], extra?: { keywordId?: string }) {

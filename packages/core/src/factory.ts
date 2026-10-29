@@ -1,5 +1,6 @@
+import { isRequired, type CustomKeyword } from './custom';
 import { newId } from './ids';
-import type { ElementDescriptor, Keyword, Locator, Project, Step, Test } from './model';
+import type { CustomCallStep, ElementDescriptor, Keyword, Locator, Project, Step, Test } from './model';
 import { Project as ProjectSchema, Settings } from './model';
 import { defaultUse } from './selector';
 
@@ -80,6 +81,13 @@ export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'group' | 'if' |
   }
 }
 
+/** A call of a custom keyword; required arguments start empty (or on their first option). */
+export function newCustomCall(def: CustomKeyword): CustomCallStep {
+  const args: Record<string, string> = {};
+  for (const a of def.args) if (isRequired(a)) args[a.name] = a.options?.[0] ?? '';
+  return { id: newId('s'), name: '', type: 'customCall', keyword: def.name, source: def.source, args };
+}
+
 function elementLabel(d: ElementDescriptor): string {
   const text = d.text?.trim();
   const hint = text || d.attributes['aria-label'] || d.attributes['placeholder'] || d.attributes['name'] || d.id || d.classes[0] || '';
@@ -136,6 +144,11 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
     }
     case 'keywordCall':
       return keywords.find((k) => k.id === step.keywordId)?.name ?? 'Missing keyword';
+    case 'customCall': {
+      const args = Object.entries(step.args).map(([k, v]) => `${k}=${v}`).join(', ');
+      const short = args.length > 40 ? `${args.slice(0, 39)}…` : args;
+      return short ? `${step.keyword} (${short})` : step.keyword;
+    }
     case 'raw':
       return step.lines[0]?.trim() ?? 'Raw';
   }

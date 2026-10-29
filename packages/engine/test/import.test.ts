@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { newProject, Project, type Step } from '@joule/core';
 import { externallyEdited, saveProject } from '@joule/core/node';
-import { findPython, importFolder } from '../src';
+import { findPython, importFolder, scanCustomKeywords } from '../src';
 
 const python = await findPython(process.cwd());
 const btn = { tag: 'button', id: 'go', classes: ['x'], attributes: { type: 'submit' }, text: 'Go' };
@@ -115,5 +115,51 @@ describe.runIf(python)('robot import', () => {
     expect(t.steps[1]).toMatchObject({ action: { kind: 'fill', value: '${USER}' }, locator: { custom: 'id=user' } });
     expect(t.steps[3]).toMatchObject({ mode: 'assert', assertion: { property: 'text', operator: '==', expected: 'Thanks' } });
     expect(t.steps[5]).toMatchObject({ type: 'group', name: 'Do The Thing', steps: [{ type: 'wait', wait: { kind: 'time', seconds: 1 } }] });
+  });
+
+  it('scans custom keywords and round-trips calls to them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-custom-'));
+    await mkdir(join(dir, 'custom_keywords', 'sub'), { recursive: true });
+    await writeFile(
+      join(dir, 'custom_keywords', 'sub', 'login.resource'),
+      [
+        '*** Keywords ***',
+        'Login As',
+        '    [Documentation]    Logs in.',
+        '    ...',
+        '    ...    Second paragraph.',
+        "    [Arguments]    ${user}    ${mode: Literal['fast', 'slow']}=fast    ${remember: bool}=False",
+        '    Log    ${user} ${mode} ${remember}',
+        '',
+      ].join('\n'),
+    );
+    const { keywords } = await scanCustomKeywords(dir, python!);
+    expect(keywords).toEqual([
+      {
+        name: 'Login As',
+        source: 'custom_keywords/sub/login.resource',
+        doc: 'Logs in.\n\nSecond paragraph.',
+        args: [
+          { name: 'user', kind: 'arg' },
+          { name: 'mode', kind: 'arg', default: 'fast', type: "Literal['fast', 'slow']", options: ['fast', 'slow'] },
+          { name: 'remember', kind: 'arg', default: 'False', type: 'bool', options: ['True', 'False'] },
+        ],
+      },
+    ]);
+
+    const p = project();
+    p.tests[0].steps.push({ id: 'cc', name: 'Sign in', type: 'customCall', keyword: 'Login As', source: keywords[0].source, args: { user: '${USER}', mode: 'slow' } });
+    const saved = await saveProject(dir, Project.parse(p));
+    const { project: back, warnings } = await importFolder(dir, python!, saved);
+    expect(warnings).toEqual([]);
+    expect(back.tests).toEqual(saved.tests);
+    // the custom file is not taken over as one of Joule's own keywords
+    expect(back.keywords.map((k) => k.name)).toEqual(['Login']);
+
+    // a hand-written positional call is recognised as well
+    const file = join(dir, 'tests', 'Test1.robot');
+    await writeFile(file, (await readFile(file, 'utf8')).replace('    Take Screenshot', '    Login As    carol    fast\n    Take Screenshot'));
+    const { project: edited } = await importFolder(dir, python!, saved);
+    expect(edited.tests[0].steps.find((s) => s.type === 'customCall' && s.id !== 'cc')).toMatchObject({ keyword: 'Login As', args: { user: 'carol', mode: 'fast' } });
   });
 });

@@ -145,6 +145,17 @@ export type KeywordCallStep = z.infer<typeof KeywordCallStep>;
 export const RawStep = z.object({ ...base, type: z.literal('raw'), lines: z.array(z.string()) });
 export type RawStep = z.infer<typeof RawStep>;
 
+/** Call of a keyword from custom_keywords/; args are passed by name (only the ones that are set). */
+export const CustomCallStep = z.object({
+  ...base,
+  type: z.literal('customCall'),
+  keyword: z.string(),
+  /** Project relative file that defines the keyword. */
+  source: z.string(),
+  args: z.record(z.string()).default({}),
+});
+export type CustomCallStep = z.infer<typeof CustomCallStep>;
+
 /** Condition of an if step: an assertion on an element. */
 export const Condition = z.object({ locator: Locator, assertion: Assertion });
 export type Condition = z.infer<typeof Condition>;
@@ -152,11 +163,11 @@ export type Condition = z.infer<typeof Condition>;
 export type GroupStep = { id: string; name: string; type: 'group'; collapsed: boolean; steps: Step[] };
 export type IfStep = { id: string; name: string; type: 'if'; condition: Condition; then: Step[]; else: Step[] };
 
-export type Step = ElementStep | WaitStep | PauseStep | ScreenshotStep | KeywordCallStep | RawStep | GroupStep | IfStep;
+export type Step = ElementStep | WaitStep | PauseStep | ScreenshotStep | KeywordCallStep | CustomCallStep | RawStep | GroupStep | IfStep;
 export type StepType = Step['type'];
 
 export const Step: z.ZodType<Step, z.ZodTypeDef, unknown> = z.lazy(() =>
-  z.union([ElementStep, WaitStep, PauseStep, ScreenshotStep, KeywordCallStep, RawStep, GroupStep, IfStep]),
+  z.union([ElementStep, WaitStep, PauseStep, ScreenshotStep, KeywordCallStep, CustomCallStep, RawStep, GroupStep, IfStep]),
 );
 
 export const GroupStep: z.ZodType<GroupStep, z.ZodTypeDef, unknown> = z.object({

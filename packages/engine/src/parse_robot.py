@@ -1,6 +1,7 @@
 """Parse .robot/.resource files with Robot Framework's own parser and print a JSON summary.
 
 Usage: python parse_robot.py <folder>
+       python parse_robot.py --custom <folder>   (only the keywords in <folder>/custom_keywords)
 Used by Joule to open projects it did not create (or that were edited by hand).
 """
 import ast
@@ -10,6 +11,9 @@ from pathlib import Path
 
 from robot.api import get_model
 from robot.api.parsing import Comment, EmptyLine, If, KeywordCall
+
+# Keep in sync with CUSTOM_KEYWORDS_DIR in core/src/custom.ts.
+CUSTOM_DIR = "custom_keywords"
 
 
 def source_lines(node, lines):
@@ -85,11 +89,48 @@ def parse_env(path):
     return values
 
 
+def robot_files(folder):
+    return sorted(list(folder.rglob("*.robot")) + list(folder.rglob("*.resource")))
+
+
+def parse_custom(root):
+    """Name, documentation and [Arguments] of every keyword in custom_keywords/."""
+    out = []
+    folder = root / CUSTOM_DIR
+    if not folder.is_dir():
+        return out
+    for path in robot_files(folder):
+        entry = {"file": path.relative_to(root).as_posix(), "keywords": []}
+        try:
+            for section in get_model(str(path)).sections:
+                if type(section).__name__ != "KeywordSection":
+                    continue
+                for kw in section.body:
+                    if not hasattr(kw, "name"):
+                        continue
+                    doc, args = "", []
+                    for node in kw.body:
+                        stype = getattr(node, "type", None)
+                        if stype == "DOCUMENTATION":
+                            doc = node.value
+                        elif stype == "ARGUMENTS":
+                            args = list(node.values)
+                    entry["keywords"].append({"name": kw.name, "doc": doc, "args": args})
+        except Exception as e:  # keep going; report per file
+            entry["error"] = str(e)
+        out.append(entry)
+    return out
+
+
 def main():
+    if sys.argv[1] == "--custom":
+        sys.stdout.write(json.dumps({"custom": parse_custom(Path(sys.argv[2]).resolve())}))
+        return
     root = Path(sys.argv[1]).resolve()
     files = []
-    for path in sorted(list(root.rglob("*.robot")) + list(root.rglob("*.resource"))):
-        if any(part in (".venv", "node_modules", "logs") for part in path.parts):
+    for path in robot_files(root):
+        rel = path.relative_to(root).parts
+        if any(part in (".venv", "node_modules", "logs") for part in path.parts) or rel[0] == CUSTOM_DIR:
             continue
         try:
             files.append(parse_file(path, root))
@@ -100,7 +141,7 @@ def main():
     if env_dir.is_dir():
         for path in env_dir.glob("*.py"):
             env[path.stem] = parse_env(path)
-    sys.stdout.write(json.dumps({"files": files, "env": env}))
+    sys.stdout.write(json.dumps({"files": files, "env": env, "custom": parse_custom(root)}))
 
 
 if __name__ == "__main__":

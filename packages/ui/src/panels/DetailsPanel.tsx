@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpFromLine, CheckCircle2, ChevronDown, ChevronRight, Crosshair, ExternalLink, Link2Off, Plus, Puzzle, SquareDashed, Ungroup, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpFromLine, CheckCircle2, ChevronDown, ChevronRight, Code2, Crosshair, ExternalLink, Link2Off, Plus, Puzzle, SquareDashed, Ungroup, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   availableProps,
@@ -6,16 +6,21 @@ import {
   buildSelector,
   defaultScopeUse,
   describeStep,
+  findCustomKeyword,
   findStep,
   interpolate,
   isCheckable,
+  isRequired,
   isSelect,
   isTextInput,
   OPERATORS,
   scopeSelector,
+  stepSignature,
   type ActionKind,
   type Assertion,
   type BaseLocator,
+  type CustomCallStep,
+  type CustomKeywordArg,
   type ElementDescriptor,
   type Locator,
   type Scope,
@@ -477,6 +482,103 @@ function WaitDetails({ step, upd }: { step: Extract<Step, { type: 'wait' }>; upd
   );
 }
 
+/** Documentation and file of the custom keyword a step calls, shown right under the title. */
+function CustomKeywordDoc({ step }: { step: CustomCallStep }) {
+  const def = findCustomKeyword(useStore((s) => s.customKeywords), step);
+  return (
+    <>
+      {def?.doc && <div className="kw-doc">{def.doc}</div>}
+      <div className="muted mono kw-source">{def?.source ?? step.source}</div>
+    </>
+  );
+}
+
+function argHint(a: CustomKeywordArg, required: boolean): string {
+  if (required) return 'required';
+  if (a.default !== undefined) return `optional · default ${a.default === '' ? '(empty)' : a.default}`;
+  return 'optional';
+}
+
+function CustomCallDetails({ step, upd }: { step: CustomCallStep; upd: Upd }) {
+  const def = findCustomKeyword(useStore((s) => s.customKeywords), step);
+  const setArg = (name: string, value: string | undefined) =>
+    upd((s) => {
+      if (s.type !== 'customCall') return s;
+      const args = { ...s.args };
+      if (value === undefined) delete args[name];
+      else args[name] = value;
+      // follow the keyword when its file moved
+      return { ...s, args, source: def?.source ?? s.source };
+    });
+  const toRobot = () => upd((s) => ({ id: s.id, name: s.name, type: 'raw', lines: (stepSignature(s) ?? '').split('\n') }));
+  const editable = def?.args.filter((a) => a.kind === 'arg' || a.kind === 'named') ?? [];
+  const known = new Set(editable.map((a) => a.name));
+  const unknown = Object.keys(step.args).filter((n) => !known.has(n));
+  const extra = def?.args.filter((a) => a.kind === 'varargs' || a.kind === 'kwargs') ?? [];
+  return (
+    <>
+      {!def && (
+        <div className="notice warn">
+          <AlertTriangle size={14} /> "{step.keyword}" was not found in custom_keywords/. Check the file, then right-click Reusable keywords → Rescan custom keywords.
+        </div>
+      )}
+      {def && !editable.length && !extra.length && <p className="muted">This keyword takes no arguments.</p>}
+      {editable.map((a) => {
+        const required = isRequired(a);
+        const value = step.args[a.name];
+        const clear = (v: string) => (v === '' && !required ? undefined : v);
+        return (
+          <div className="field" key={a.name}>
+            <label className="arg-label">
+              {a.name} {a.type && !a.options && <span className="badge">{a.type}</span>} <span className="muted">{argHint(a, required)}</span>
+            </label>
+            {a.options ? (
+              <select className="select" value={value ?? ''} onChange={(e) => setArg(a.name, clear(e.target.value))}>
+                {!required && <option value="">{a.default !== undefined ? `(default: ${a.default})` : '(not set)'}</option>}
+                {value !== undefined && !a.options.includes(value) && <option value={value}>{value}</option>}
+                {a.options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <ValueField value={value ?? ''} placeholder={a.default} onCommit={(v) => setArg(a.name, clear(v))} />
+            )}
+            {required && !value && <div className="field-hint err">A value is required</div>}
+          </div>
+        );
+      })}
+      {unknown.map((n) => (
+        <div className="field" key={n}>
+          <label className="arg-label">
+            {n} {def && <span className="badge warn">no longer an argument</span>}
+          </label>
+          <div className="row">
+            <div className="grow">
+              <ValueField value={step.args[n]} onCommit={(v) => setArg(n, v)} />
+            </div>
+            <button className="icon-btn small" title="Remove this argument" onClick={() => setArg(n, undefined)}>
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      ))}
+      {extra.map((a) => (
+        <div className="notice info" key={a.name}>
+          {a.kind === 'varargs' ? `@{${a.name}}` : `&{${a.name}}`} takes any number of extra {a.kind === 'varargs' ? 'values' : 'name=value pairs'}. These can't be set here; convert the step to Robot code to pass them.
+        </div>
+      ))}
+      <div className="row wrap">
+        <button className="btn small" onClick={toRobot} title="Replace this step by the Robot Framework line it generates, to edit it freely">
+          <Code2 size={13} /> Convert to Robot code
+        </button>
+      </div>
+      <div className="notice info" style={{ marginTop: 12 }}>Custom keywords run with Robot Framework; they are skipped when running inside the app.</div>
+    </>
+  );
+}
+
 function StepDetails({ step }: { step: Step }) {
   const project = useStore((s) => s.project)!;
   const upd: Upd = (fn) => updateCurrentStep(step.id, fn);
@@ -566,6 +668,8 @@ function StepDetails({ step }: { step: Step }) {
         </>
       );
     }
+    case 'customCall':
+      return <CustomCallDetails step={step} upd={upd} />;
     case 'raw':
       return (
         <>
@@ -615,6 +719,7 @@ export function DetailsPanel() {
           <TypeIcon step={step} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{describeStep(step, project.keywords)}</span>
         </h3>
+        {step.type === 'customCall' && <CustomKeywordDoc step={step} />}
         {state?.status === 'fail' && state.message && (
           <div className="notice err">
             <AlertTriangle size={14} /> {state.message}

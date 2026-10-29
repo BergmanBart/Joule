@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Camera,
   CheckSquare,
   Clock,
@@ -42,6 +43,7 @@ const META: Record<string, StepMeta> = {
   if: { icon: GitBranch, color: '#facc15', label: 'If' },
   group: { icon: Folder, color: '#a1a1aa', label: 'Group' },
   keywordCall: { icon: Puzzle, color: '#a78bfa', label: 'Keyword' },
+  customCall: { icon: BookOpen, color: '#38bdf8', label: 'Custom keyword' },
   raw: { icon: Code2, color: '#94a3b8', label: 'Robot code' },
 };
 

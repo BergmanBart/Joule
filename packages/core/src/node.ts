@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
+import { CUSTOM_KEYWORDS_DIR } from './custom';
 import { Project } from './model';
 import { generateRobotFiles } from './robot/generate';
 
@@ -46,6 +47,8 @@ export async function saveProject(dir: string, project: Project): Promise<Projec
   const saved: Project = { ...project, generatedHashes: hashes };
   const shots = saved.settings.screenshotDir;
   await mkdir(isAbsolute(shots) ? shots : join(dir, shots), { recursive: true });
+  // where users drop their own keyword files (shown under Reusable keywords → Custom Keywords)
+  await mkdir(join(dir, CUSTOM_KEYWORDS_DIR), { recursive: true });
   await writeFile(join(dir, PROJECT_FILE), JSON.stringify(saved, null, 2) + '\n', 'utf8');
   // Old generated helpers (uitester.resource, UITesterLib.py) went with the stale-file cleanup above.
   await rm(join(dir, LEGACY_PROJECT_FILE), { force: true });

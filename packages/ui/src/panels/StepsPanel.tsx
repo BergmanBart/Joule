@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Camera,
   CheckCircle2,
   ChevronDown,
@@ -30,6 +31,7 @@ import { api } from '../api';
 import { Menu, MenuItem } from '../components/ui';
 import { TypeIcon } from '../stepMeta';
 import {
+  addCustomCall,
   addStepOfType,
   addSteps,
   clearSelection,
@@ -87,6 +89,7 @@ export function StepsPanel() {
   const run = useStore((s) => s.run);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
+  const customKeywords = useStore((s) => s.customKeywords);
   const [drop, setDrop] = useState<{ key: string; pos: DropPos } | null>(null);
 
   const steps = containerSteps(project, current);
@@ -312,6 +315,13 @@ export function StepsPanel() {
                     {k.name}
                   </MenuItem>
                 ))}
+              {customKeywords.length > 0 && <div className="heading">Custom keywords</div>}
+              {customKeywords.map((k) => (
+                <MenuItem key={`${k.source}#${k.name}`} icon={<BookOpen size={14} color="#38bdf8" />} onClick={() => (close(), addCustomCall(k))}>
+                  {k.name}
+                  {customKeywords.some((o) => o !== k && o.name.toLowerCase() === k.name.toLowerCase()) && <span className="muted"> · {k.source.split('/').pop()}</span>}
+                </MenuItem>
+              ))}
               <div className="sep" />
               <div className="muted" style={{ padding: '4px 10px 6px', fontSize: 11.5, display: 'flex', gap: 6, alignItems: 'center' }}>
                 <MousePointerClick size={13} /> Element events: use Record mode in the browser view

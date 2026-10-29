@@ -54,6 +54,11 @@ everything into a `.venv` in the project folder. Python is looked up in this ord
   reusable keywords.
 - **Groups**: select steps (Ctrl/Shift-click) → Ctrl+G. Copy/paste them between tests (Ctrl+C / Ctrl+V).
   *Make reusable* turns a group into a linked keyword shared by all tests (edit it once, it changes everywhere).
+- **Custom keywords**: put your own `.robot` / `.resource` keyword files in `custom_keywords/` (subfolders are
+  fine). They appear under *Reusable keywords → Custom Keywords*; right-click *Reusable keywords* to rescan after
+  changing them. Click one (or pick it in **Add**) to add a call. The details show its documentation and a field per
+  argument; type hints `${size: Literal['small', 'large']}` and `${flag: bool}` (Robot Framework 7.3+) become
+  dropdowns. Custom keywords run with Robot Framework and are skipped when running inside the app.
 - **Run**: ▶ in the steps column runs the selection or the whole test inside the app (pause → Continue button).
   ▶ next to a test, or **Run all**, runs Robot Framework itself; output, PASS/FAIL and the log are shown at the bottom.
 - **Parameters** (top bar): name + a value per environment (DEV/TEST/ACC/PROD); `URL` is required. Tests can
@@ -71,6 +76,7 @@ tests/<Test>.robot            one suite per test, tagged with flow and kind
 resources/keywords.resource   reusable groups (linked keywords)
 resources/joule.resource      browser setup; override with -v BROWSER:firefox -v HEADLESS:True ...
 resources/JouleLib.py         Pause For Key
+custom_keywords/              your own keyword files (not generated; imported by the tests that use them)
 env/DEV.py … env/PROD.py      parameter values per environment
 run.bat / run.sh              run everything:  run.bat PROD -v HEADLESS:True
 run_parallel.bat, run_plan.txt   run plan for pabot
