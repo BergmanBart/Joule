@@ -3,6 +3,7 @@
   "displayName": "Joule",
   "description": "Build, maintain and run UI tests visually; saved as Robot Framework files.",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "commonjs",
   "engines": { "vscode": "^1.85.0" },

@@ -140,3 +140,7 @@ One TypeScript codebase (npm workspaces):
 
 `npm test` runs unit tests and end-to-end tests (real browser via installed Edge/Chrome; Robot tests run when
 Robot Framework is available).
+
+## License
+
+[MIT](LICENSE)
