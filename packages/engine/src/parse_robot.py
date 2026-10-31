@@ -97,13 +97,29 @@ def random_pattern(node):
     return None
 
 
+def relative_date(node):
+    """Expression and format of a _relative_date("...", "...") call (a date parameter), else None."""
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_relative_date"
+        and 1 <= len(node.args) <= 2
+        and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args)
+    ):
+        return None
+    out = {"expression": node.args[0].value}
+    if len(node.args) == 2:
+        out["format"] = node.args[1].value
+    return out
+
+
 def parse_env(path):
-    """Read NAME = "literal" / combined / random assignments without executing the file."""
-    values, randoms = {}, {}
+    """Read NAME = "literal" / combined / random / date assignments without executing the file."""
+    values, randoms, dates = {}, {}, {}
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except Exception:
-        return values, randoms
+        return values, randoms, dates
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
@@ -113,13 +129,17 @@ def parse_env(path):
             if pattern is not None:
                 randoms[name] = pattern
                 continue
+            date = relative_date(node.value)
+            if date is not None:
+                dates[name] = date
+                continue
             try:
                 value = ast.literal_eval(node.value)
             except Exception:
                 value = text_of(node.value)
             if isinstance(value, (str, int, float, bool)):
                 values[name] = str(value)
-    return values, randoms
+    return values, randoms, dates
 
 
 def robot_files(folder):
@@ -169,12 +189,12 @@ def main():
             files.append(parse_file(path, root))
         except Exception as e:  # keep going; report per file
             files.append({"file": path.relative_to(root).as_posix(), "error": str(e)})
-    env, env_random = {}, {}
+    env, env_random, env_date = {}, {}, {}
     env_dir = root / "env"
     if env_dir.is_dir():
         for path in env_dir.glob("*.py"):
-            env[path.stem], env_random[path.stem] = parse_env(path)
-    sys.stdout.write(json.dumps({"files": files, "env": env, "envRandom": env_random, "custom": parse_custom(root)}))
+            env[path.stem], env_random[path.stem], env_date[path.stem] = parse_env(path)
+    sys.stdout.write(json.dumps({"files": files, "env": env, "envRandom": env_random, "envDate": env_date, "custom": parse_custom(root)}))
 
 
 if __name__ == "__main__":

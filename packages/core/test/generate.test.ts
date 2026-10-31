@@ -228,6 +228,39 @@ describe('parameters', () => {
     expect(resolveParameters(p).find((x) => x.name === 'R')).toMatchObject({ value: '', error: expect.stringContaining('Invalid regex') });
   });
 
+  function dateProject(): Project {
+    const p = newProject('Dates', 'https://example.com/?from=${FROM}');
+    p.parameters.push({ name: 'FROM', kind: 'date', values: { default: 'today + 1wd', PROD: '2026-12-25' } });
+    const t = p.tests[0];
+    t.id = 't1';
+    t.parameters.push({ name: 'DUE', kind: 'date', format: 'yyyy-MM-dd', values: { default: 'today + 1m' } });
+    t.parameters.push({ name: 'NOTE', values: { default: 'Due ${DUE}' } });
+    return Project.parse(p);
+  }
+
+  it('works out date parameters from the clock', () => {
+    const p = dateProject();
+    const now = new Date(2026, 0, 30, 14, 5);
+    const r = resolveParameters(p, p.tests[0], undefined, { now });
+    expect(value(r, 'URL')).toBe('https://example.com/?from=02-02-2026');
+    expect(value(r, 'NOTE')).toBe('Due 2026-02-28');
+    expect(value(resolveParameters(p, undefined, 'PROD', { now }), 'FROM')).toBe('25-12-2026');
+    p.parameters[1].values.default = 'today + 1x';
+    expect(resolveParameters(p).find((x) => x.name === 'FROM')).toMatchObject({ value: '', error: 'Invalid date: Unknown unit "x"' });
+  });
+
+  it('generates Python and Robot code that works out dates', () => {
+    const files = generateRobotFiles(dateProject());
+    expect(files['env/TEST.py']).toContain('from JouleLib import relative_date as _relative_date  # noqa: E402');
+    expect(files['env/TEST.py']).toContain('FROM = _relative_date("today + 1wd", "dd-MM-yyyy")\nURL = "https://example.com/?from=" + FROM\n');
+    expect(files['env/PROD.py']).toContain('FROM = _relative_date("2026-12-25", "dd-MM-yyyy")');
+    expect(files['resources/JouleLib.py']).toContain('@keyword("Relative Date")');
+    expect(files['resources/JouleLib.py']).toContain('DEFAULT_DATE_FORMAT = "dd-MM-yyyy"');
+    expect(files['tests/Test1.robot']).toContain(
+      ['    ${DUE}=    Relative Date    today + 1m    yyyy-MM-dd', '    Set Suite Variable    ${DUE}', '    Set Suite Variable    ${NOTE}    Due ${DUE}'].join('\n'),
+    );
+  });
+
   it('generates Python and Robot code that draws and combines values', () => {
     const files = generateRobotFiles(caseProject());
     const env = files['env/TEST.py'];

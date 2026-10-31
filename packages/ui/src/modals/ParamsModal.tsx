@@ -1,14 +1,32 @@
-import { AlertTriangle, Dices, Plus, Trash2, Variable } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Dices, Plus, Trash2, Variable } from 'lucide-react';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { ENVIRONMENTS, PARAM_NAME, randomFromRegex, regexError, resolveParameters, type Environment, type Parameter, type ResolvedParameter } from '@joule/core';
+import {
+  DEFAULT_DATE_FORMAT,
+  ENVIRONMENTS,
+  PARAM_NAME,
+  dateError,
+  isComputed,
+  randomFromRegex,
+  regexError,
+  resolveParameters,
+  type Environment,
+  type Parameter,
+  type ParameterKind,
+  type ResolvedParameter,
+} from '@joule/core';
 import { Modal, TextField } from '../components/ui';
 import { edit, editTest, useStore } from '../store';
 
 const PREVIEW: CSSProperties = { marginTop: 2, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 };
 
-function withKind(p: Parameter, kind: string): Parameter {
-  const { kind: _, ...text } = p;
-  return kind === 'random' ? { ...text, kind: 'random' } : text;
+const DATE_HELP =
+  'today or now, plus offsets such as + 3d, - 1w, + 2m, + 1y, + 5wd (working days, Mon–Fri), + 2h, - 30min; or a date such as 2026-12-25 or 25-12-2026 14:30';
+const FORMAT_HELP = 'Output format: yyyy, yy, MM, M, dd, d, HH, H, mm, ss; anything else is kept as is';
+
+function withKind(p: Parameter, kind: ParameterKind): Parameter {
+  const { kind: _, format: __, ...text } = p;
+  if (kind === 'text') return text;
+  return kind === 'date' && p.format ? { ...text, kind, format: p.format } : { ...text, kind };
 }
 
 function draw(pattern: string): string {
@@ -47,9 +65,19 @@ function TextPreview({ r }: { r: ResolvedParameter }) {
   );
 }
 
-/** Field for a value or (random parameters) a regex, marked when the regex is not usable. */
-function ValueCell({ value, random, placeholder, onCommit }: { value: string; random: boolean; placeholder?: string; onCommit: (v: string) => void }) {
-  const error = random && value ? regexError(value) : undefined;
+/** The date a date parameter stands for in the active environment. */
+function DatePreview({ r }: { r: ResolvedParameter }) {
+  if (r.error) return <div style={{ ...PREVIEW, color: 'var(--danger)' }} title={r.error}>{r.error}</div>;
+  return (
+    <div className="muted mono" style={PREVIEW} title={DATE_HELP}>
+      = {r.value}
+    </div>
+  );
+}
+
+/** Field for a value, a regex or a date expression, marked when the regex or date is not usable. */
+function ValueCell({ value, kind, placeholder, onCommit }: { value: string; kind: ParameterKind; placeholder?: string; onCommit: (v: string) => void }) {
+  const error = !value ? undefined : kind === 'random' ? regexError(value) : kind === 'date' ? dateError(value) : undefined;
   return (
     <div title={error}>
       <TextField value={value} mono placeholder={placeholder} onCommit={onCommit} className={error ? 'invalid' : ''} />
@@ -78,7 +106,7 @@ export function ParamTable({
   const update = (i: number, fn: (p: Parameter) => Parameter) => onChange(params.map((p, j) => (j === i ? fn(p) : p)));
   const names = params.map((p) => p.name);
   const resolvedOf = (p: Parameter) => resolved.find((r) => r.name === p.name);
-  const cycles = [...new Set(params.flatMap((p) => (p.kind !== 'random' && resolvedOf(p)?.error) || []))];
+  const cycles = [...new Set(params.flatMap((p) => (!isComputed(p) && resolvedOf(p)?.error) || []))];
   const add = (extra: Partial<Parameter>, prefix: string) => {
     let n = 1;
     while (names.includes(`${prefix}_${n}`)) n++;
@@ -90,7 +118,7 @@ export function ParamTable({
         <thead>
           <tr>
             <th style={{ width: 150 }}>Name</th>
-            <th style={{ width: 86 }}>Type</th>
+            <th style={{ width: 104 }}>Type</th>
             <th>Default</th>
             {ENVIRONMENTS.map((e) => (
               <th key={e} style={{ width: 110, color: e === env ? 'var(--accent)' : undefined }}>
@@ -103,7 +131,7 @@ export function ParamTable({
         <tbody>
           {params.map((p, i) => {
             const invalid = !PARAM_NAME.test(p.name) || names.indexOf(p.name) !== i;
-            const random = p.kind === 'random';
+            const kind = p.kind ?? 'text';
             const r = resolvedOf(p);
             return (
               <tr key={i}>
@@ -123,31 +151,47 @@ export function ParamTable({
                     )}
                   </div>
                 </td>
-                <td>
+                <td style={{ verticalAlign: 'top' }}>
                   <select
                     className="select"
-                    value={random ? 'random' : 'text'}
-                    title="Text: a fixed value, which can use other parameters as ${NAME}. Regex: a random value matching the pattern, drawn again every time."
-                    onChange={(e) => update(i, (x) => withKind(x, e.target.value))}
+                    value={kind}
+                    title="Text: a fixed value, which can use other parameters as ${NAME}. Regex: a random value matching the pattern, drawn again every time. Date: a date relative to today (e.g. today + 3d) or a fixed date, worked out every time."
+                    onChange={(e) => update(i, (x) => withKind(x, e.target.value as ParameterKind))}
                   >
                     <option value="text">Text</option>
                     <option value="random">Regex</option>
+                    <option value="date">Date</option>
                   </select>
+                  {kind === 'date' && (
+                    <div title={FORMAT_HELP} style={{ marginTop: 4 }}>
+                      <TextField
+                        value={p.format ?? ''}
+                        mono
+                        placeholder={DEFAULT_DATE_FORMAT}
+                        onCommit={(v) =>
+                          update(i, ({ format: _, ...x }) => {
+                            const format = v.trim();
+                            return format && format !== DEFAULT_DATE_FORMAT ? { ...x, format } : x;
+                          })
+                        }
+                      />
+                    </div>
+                  )}
                 </td>
                 <td style={{ verticalAlign: 'top' }}>
                   <ValueCell
                     value={p.values.default}
-                    random={random}
-                    placeholder={random ? 'regex, e.g. [A-Z]{3}\\d{4}' : undefined}
+                    kind={kind}
+                    placeholder={kind === 'random' ? 'regex, e.g. [A-Z]{3}\\d{4}' : kind === 'date' ? 'e.g. today + 3d' : undefined}
                     onCommit={(v) => update(i, (x) => ({ ...x, values: { ...x.values, default: v } }))}
                   />
-                  {r && (random ? <RandomPreview pattern={r.raw} error={r.error} /> : <TextPreview r={r} />)}
+                  {r && (kind === 'random' ? <RandomPreview pattern={r.raw} error={r.error} /> : kind === 'date' ? <DatePreview r={r} /> : <TextPreview r={r} />)}
                 </td>
                 {ENVIRONMENTS.map((e: Environment) => (
                   <td key={e} style={{ verticalAlign: 'top' }}>
                     <ValueCell
                       value={p.values[e] ?? ''}
-                      random={random}
+                      kind={kind}
                       placeholder="default"
                       onCommit={(v) => update(i, (x) => ({ ...x, values: { ...x.values, [e]: v || undefined } }))}
                     />
@@ -186,6 +230,13 @@ export function ParamTable({
         >
           <Dices size={13} /> Add random parameter
         </button>
+        <button
+          className="btn small"
+          title="A date relative to today (e.g. today + 5wd) or a fixed date, worked out every time the start page is opened or a test is run"
+          onClick={() => add({ kind: 'date', values: { default: 'today' } }, 'DATE')}
+        >
+          <CalendarDays size={13} /> Add date parameter
+        </button>
       </div>
     </>
   );
@@ -194,7 +245,9 @@ export function ParamTable({
 const COMBINE_HELP = (
   <>
     Combine parameters by using <span className="mono">${'{NAME}'}</span> inside a value, e.g. <span className="mono">${'{BASE_URL}'}/case/${'{CASE_ID}'}</span>. A{' '}
-    <b>Regex</b> parameter gets a new random value every time the start page is opened or a test is run.
+    <b>Regex</b> parameter gets a new random value every time the start page is opened or a test is run. A <b>Date</b> parameter is
+    worked out at the same moments: <span className="mono">today + 5wd</span> (working days), <span className="mono">now - 2h</span>, or a fixed date such
+    as <span className="mono">2026-12-25</span>.
   </>
 );
 

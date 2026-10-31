@@ -1,22 +1,25 @@
-import type { Environment, Parameter, Project, Test } from './model';
+import type { Environment, Parameter, ParameterKind, Project, Test } from './model';
+import { dateFromExpression } from './date';
 import { randomFromRegex } from './random';
 
 export interface ResolvedParameter {
   name: string;
   value: string;
-  /** The value as written: text with ${refs}, or the regex of a random parameter. */
+  /** The value as written: text with ${refs}, the regex of a random parameter or the expression of a date. */
   raw: string;
-  kind: 'text' | 'random';
+  kind: ParameterKind;
   source: 'project' | 'test';
   /** True when a test parameter overrides a project parameter with the same name. */
   shadowed: boolean;
-  /** Why the value could not be fully resolved (invalid regex, circular reference). */
+  /** Why the value could not be fully resolved (invalid regex or date, circular reference). */
   error?: string;
 }
 
 export interface ResolveOptions {
   /** Random source used to draw random values. */
   random?: () => number;
+  /** Clock for date parameters. */
+  now?: Date;
   /** Earlier results: random parameters with the same name and regex keep their value. */
   reuse?: ResolvedParameter[];
 }
@@ -26,6 +29,11 @@ const REF = /\$\{([^}]+)\}/g;
 export function parameterValue(p: Parameter, env: Environment): string {
   const v = p.values[env];
   return v !== undefined && v !== '' ? v : p.values.default;
+}
+
+/** Random and date parameters: their value is computed when parameters are resolved and never references others. */
+export function isComputed(p: Parameter): boolean {
+  return p.kind === 'random' || p.kind === 'date';
 }
 
 /**
@@ -47,7 +55,7 @@ export function referenceOrder(params: Parameter[], env: Environment): { order: 
       return;
     }
     stack.push(p.name);
-    if (p.kind !== 'random') {
+    if (!isComputed(p)) {
       for (const ref of parameterRefs(parameterValue(p, env))) {
         const dep = byName.get(ref);
         if (dep) visit(dep);
@@ -80,6 +88,16 @@ function resolveList(params: Parameter[], env: Environment, outer: Record<string
       }
       continue;
     }
+    if (p.kind === 'date') {
+      try {
+        values[p.name] = dateFromExpression(raw, p.format, opts.now);
+        out.set(p.name, { value: values[p.name], raw });
+      } catch (e) {
+        values[p.name] = '';
+        out.set(p.name, { value: '', raw, error: `Invalid date: ${(e as Error).message}` });
+      }
+      continue;
+    }
     values[p.name] = raw.replace(REF, (m, ref: string) => {
       if (own.has(ref)) return cyclic.has(ref) ? m : values[ref];
       return ref in outer ? outer[ref] : m;
@@ -92,7 +110,8 @@ function resolveList(params: Parameter[], env: Environment, outer: Record<string
 /**
  * Test parameters win over project parameters; the current environment wins over default.
  * Values can reference other parameters as ${NAME}: project parameters only see project
- * parameters, test parameters see both. Random parameters get a new value on every call.
+ * parameters, test parameters see both. Random parameters get a new value on every call,
+ * date parameters are computed from `opts.now` (default: the current time).
  */
 export function resolveParameters(project: Project, test?: Test, env: Environment = project.settings.environment, opts: ResolveOptions = {}): ResolvedParameter[] {
   const fromProject = resolveList(project.parameters, env, {}, opts);

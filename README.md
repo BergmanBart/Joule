@@ -65,7 +65,10 @@ everything into a `.venv` in the project folder. Python is looked up in this ord
   override parameters (shown with a warning) in *Test settings*, along with happy/unhappy and smoke/regression.
   A value can combine other parameters (`${BASE_URL}/case/${CASE_ID}`); project parameters only see project
   parameters, test parameters see both. A **Regex** parameter gets a random value matching its pattern, drawn
-  again on every Home click, browser start, run from the start and Robot run (one value per run).
+  again on every Home click, browser start, run from the start and Robot run (one value per run). A **Date**
+  parameter is worked out at the same moments from an expression: `today` or `now` with offsets such as
+  `+ 3d`, `- 1w`, `+ 2m`, `+ 1y`, `+ 5wd` (working days, Mon–Fri), `+ 2h`, `- 30min`, or a fixed date
+  (`2026-12-25`, `25-12-2026 14:30`). Its format (default `dd-MM-yyyy`) uses `yyyy yy MM M dd d HH H mm ss`.
 - **Project settings**: browser (Chrome, Edge, Firefox), headless, resolution, timeout, retries, environment,
   screenshot folder and the **run plan** (stages run in series, tests within a stage in parallel).
 

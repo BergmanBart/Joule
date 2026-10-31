@@ -19,13 +19,19 @@ export const ParameterValues = z.object({
 });
 export type ParameterValues = z.infer<typeof ParameterValues>;
 
-export const PARAMETER_KINDS = ['text', 'random'] as const;
+export const PARAMETER_KINDS = ['text', 'random', 'date'] as const;
+export type ParameterKind = (typeof PARAMETER_KINDS)[number];
 
-/** A text value may reference other parameters as ${NAME}; a random value is a regex the value is drawn from. */
+/**
+ * A text value may reference other parameters as ${NAME}; a random value is a regex the value is drawn from;
+ * a date value is an expression such as `today + 3d` or `2026-12-25`, written out in `format`.
+ */
 export const Parameter = z.object({
   name: z.string().min(1),
   /** Missing means text. */
   kind: z.enum(PARAMETER_KINDS).optional(),
+  /** Date parameters: output format such as dd-MM-yyyy; missing means DEFAULT_DATE_FORMAT. */
+  format: z.string().optional(),
   values: ParameterValues,
 });
 export type Parameter = z.infer<typeof Parameter>;

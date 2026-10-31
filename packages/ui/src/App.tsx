@@ -14,7 +14,6 @@ import {
   SlidersHorizontal,
   Square,
   TerminalSquare,
-  TestTube2,
   Variable,
   Wifi,
   WifiOff,
@@ -109,7 +108,7 @@ function TopBar() {
         )}
       </Menu>
       <div className="brand">
-        <TestTube2 size={18} color="var(--accent)" />
+        <img src="/favicon.svg" width={20} height={20} alt="" />
         <span className="project-name" title={projectDir}>
           {project?.name ?? 'Joule'}
         </span>

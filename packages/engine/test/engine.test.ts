@@ -257,6 +257,7 @@ describe('robot runner', async () => {
     p.settings.browser = 'msedge';
     p.parameters.push({ name: 'USERNAME', values: { default: 'alice', PROD: 'carol' } });
     p.parameters.push({ name: 'RUN_ID', kind: 'random', values: { default: '[a-z]{6}' } });
+    p.parameters.push({ name: 'RUN_DATE', kind: 'date', values: { default: 'today + 1wd' } });
     p.tests[0].steps = loginSteps();
     const second = { ...structuredClone(p.tests[0]), id: 't2', name: 'login as prod user' };
     p.tests.push(second);
@@ -265,10 +266,11 @@ describe('robot runner', async () => {
       name: 'delete inside shadow roots',
       flow: 'happy',
       kind: 'regression',
-      // a random case id in the start URL, drawn by the generated suite setup
+      // a random case id and a due date in the start URL, set by the generated suite setup
       parameters: [
         { name: 'CASE', kind: 'random', values: { default: '[A-Z]{5}' } },
-        { name: 'URL', values: { default: URL + 'shadow.html?case=${CASE}&run=${RUN_ID}' } },
+        { name: 'DUE', kind: 'date', format: 'yyyy-MM-dd', values: { default: 'today + 1m' } },
+        { name: 'URL', values: { default: URL + 'shadow.html?case=${CASE}&run=${RUN_ID}&due=${DUE}&from=${RUN_DATE}' } },
       ],
       steps: shadowSteps(),
     });

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { newProject, Project, type Step } from '@joule/core';
+import { dateFromExpression, newProject, Project, type Step } from '@joule/core';
 import { externallyEdited, saveProject } from '@joule/core/node';
 import { findPython, importFolder, scanCustomKeywords } from '../src';
 
@@ -108,6 +108,70 @@ describe.runIf(python)('robot import', () => {
     const env = JSON.parse(out);
     expect(env.CASE_ID).toMatch(/^C\d{6}$/);
     expect(env.URL).toBe(`https://app.example/case/${env.CASE_ID}`);
+  });
+
+  function dateProject(): Project {
+    const p = project();
+    p.parameters.push({ name: 'START', kind: 'date', values: { default: 'today + 5wd', ACC: '2026-12-25' } });
+    p.parameters.push({ name: 'STAMP', kind: 'date', format: 'yyyy-MM-dd HH:mm', values: { default: 'now - 2h' } });
+    p.tests[0].parameters.push({ name: 'DUE', kind: 'date', format: 'dd/MM/yyyy', values: { default: 'today + 1m' } });
+    p.tests[0].parameters.push({ name: 'NOTE', values: { default: 'Due ${DUE}' } });
+    return Project.parse(p);
+  }
+
+  it('round-trips date parameters', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-date-'));
+    const saved = await saveProject(dir, dateProject());
+    const { project: back, warnings } = await importFolder(dir, python!, saved);
+    expect(warnings).toEqual([]);
+    expect(back.parameters).toEqual(saved.parameters);
+    expect(back.tests).toEqual(saved.tests);
+    // without the joule.json as well
+    const { project: fresh } = await importFolder(dir, python!);
+    for (const name of ['START', 'STAMP']) expect(fresh.parameters.find((p) => p.name === name)).toEqual(saved.parameters.find((p) => p.name === name));
+    expect(fresh.tests[0].parameters.find((p) => p.name === 'DUE')).toEqual(saved.tests[0].parameters.find((p) => p.name === 'DUE'));
+  });
+
+  it('works out the same dates in the generated Python', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-pydate-'));
+    await saveProject(dir, dateProject());
+    const cases: [string, string][] = [
+      ['today', 'dd-MM-yyyy'],
+      ['now', 'yyyy-MM-dd HH:mm:ss'],
+      ['today + 3d - 1w', 'd-M-yy'],
+      ['today + 1m', 'yyyyMMdd'],
+      ['TODAY + 1 Year', 'dd.MM.yyyy'],
+      ['today - 13 months', 'dd-MM-yyyy'],
+      ['today + 1wd', 'dd-MM-yyyy'],
+      ['today - 6wd', 'dd-MM-yyyy'],
+      ['today + 2 workdays', 'dd-MM-yyyy'],
+      ['now + 10h - 30min', 'dd-MM-yyyy H:mm'],
+      ['2026-12-25', 'dd-MM-yyyy'],
+      ['25/12/2026 14:30', 'yyyy-MM-dd HH:mm'],
+      ['2028.2.29', 'yyyy-MM-dd'],
+    ];
+    const invalid = ['', 'tomorrow', 'today + 3x', 'today +', '2026-13-01', '2026-02-30', '2026-12-25 24:00', '2026-12-25 + 1d'];
+    const script = [
+      'import datetime, json, sys',
+      'sys.path.insert(0, sys.argv[1] + "/resources")',
+      'import JouleLib',
+      'JouleLib._now = lambda: datetime.datetime(2026, 1, 30, 14, 5, 9)',
+      'out = [JouleLib.relative_date(e, f) for e, f in json.loads(sys.argv[2])]',
+      'errors = []',
+      'for e in json.loads(sys.argv[3]):',
+      '    try:',
+      '        JouleLib.relative_date(e)',
+      '    except ValueError:',
+      '        errors.append(e)',
+      'print(json.dumps({"out": out, "errors": errors}))',
+    ].join('\n');
+    const stdout = await new Promise<string>((res, rej) =>
+      execFile(python!, ['-c', script, dir, JSON.stringify(cases), JSON.stringify(invalid)], (err, out, stderr) => (err ? rej(new Error(stderr)) : res(out))),
+    );
+    const now = new Date(2026, 0, 30, 14, 5, 9);
+    const py = JSON.parse(stdout);
+    expect(py.out).toEqual(cases.map(([e, f]) => dateFromExpression(e, f, now)));
+    expect(py.errors).toEqual(invalid);
   });
 
   it('detects hand edits and keeps unchanged steps', async () => {

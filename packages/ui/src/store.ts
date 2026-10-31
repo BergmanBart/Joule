@@ -310,10 +310,10 @@ export function editSteps(fn: (steps: Step[]) => Step[]) {
   });
 }
 
-/** Start URL with random parts drawn the same way every time, to tell whether the URL itself changed. */
+/** Start URL with random and date parts worked out the same way every time, to tell whether the URL itself changed. */
 function stableStartUrl(): string {
   const { project } = get();
-  return project ? urlOf(resolveParameters(project, currentTest(), undefined, { random: () => 0 })) : 'about:blank';
+  return project ? urlOf(resolveParameters(project, currentTest(), undefined, { random: () => 0, now: new Date(0) })) : 'about:blank';
 }
 
 export function selectContainer(c: Container) {

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { newProject, Project } from '@joule/core';
+import { dateFromExpression, newProject, Project } from '@joule/core';
 import { saveProject } from '@joule/core/node';
 import { checkDeps, launchBrowser } from '@joule/engine';
 import type { Browser, Locator, Page } from 'playwright-core';
@@ -331,5 +331,27 @@ describe.runIf(existsSync(join(UI, 'index.html')))('Joule app', () => {
     await expect
       .poll(() => readFile(join(dir, 'env', 'TEST.py'), 'utf8').catch(() => ''), { timeout: 5000 })
       .toMatch(/RANDOM_1 = _random_from_regex\("\[A-Z0-9\]\{8\}"\)\nURL = "http:\/\/127\.0\.0\.1:\d+\/\?case=" \+ RANDOM_1\n/);
+  }, 60_000);
+
+  it('adds a date parameter relative to today with its own format', async () => {
+    await page.getByRole('button', { name: 'Parameters' }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'Project parameters' });
+    await dialog.getByRole('button', { name: 'Add date parameter' }).click();
+    await visible(dialog.getByText(`= ${dateFromExpression('today')}`, { exact: true }));
+    const row = dialog.locator('tbody tr').last();
+    const [format, value] = [row.locator('input.input').nth(1), row.locator('input.input').nth(2)];
+    await value.fill('today + 3x');
+    await value.press('Enter');
+    await visible(dialog.getByText('Invalid date: Unknown unit "x"'));
+    await value.fill('today + 1wd');
+    await value.press('Enter');
+    await format.fill('yyyy-MM-dd');
+    await format.press('Enter');
+    await visible(dialog.getByText(`= ${dateFromExpression('today + 1wd', 'yyyy-MM-dd')}`, { exact: true }));
+    await shot('15-date-parameter');
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(() => readFile(join(dir, 'env', 'TEST.py'), 'utf8').catch(() => ''), { timeout: 5000 })
+      .toContain('DATE_1 = _relative_date("today + 1wd", "yyyy-MM-dd")\n');
   }, 60_000);
 });
