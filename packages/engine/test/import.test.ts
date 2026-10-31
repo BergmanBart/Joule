@@ -46,6 +46,14 @@ function project(): Project {
       then: [{ id: 'w1', name: '', type: 'wait', wait: { kind: 'element', locator: { props: btn, use: ['tag'] }, state: 'visible', timeoutSeconds: 3 } }],
       else: [{ id: 'w2', name: '', type: 'wait', wait: { kind: 'load', state: 'networkidle' } }],
     },
+    {
+      id: 'if2',
+      name: '',
+      type: 'if',
+      condition: { kind: 'value', value: 'user ${USER}', operator: 'matches', expected: '^user [a-z]+$' },
+      then: [{ id: 'p2', name: '', type: 'pause' }],
+      else: [],
+    },
     { id: 'sh', name: '', type: 'screenshot', filename: 'end', fullPage: true },
     { id: 'nav', name: '', type: 'navigate', url: '${URL}?user=${USER}' },
     { id: 'a1', name: '', type: 'element', mode: 'assert', locator: { props: btn, use: ['tag'] }, assertion: { property: 'state', operator: '!=', expected: 'disabled' } },
@@ -109,6 +117,40 @@ describe.runIf(python)('robot import', () => {
     const env = JSON.parse(out);
     expect(env.CASE_ID).toMatch(/^C\d{6}$/);
     expect(env.URL).toBe(`https://app.example/case/${env.CASE_ID}`);
+  });
+
+  it('compares values in the generated Python like the in-app run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-compare-'));
+    await saveProject(dir, project());
+    const cases: [string, string, string, boolean][] = [
+      ['retail', '==', 'retail', true],
+      ['retail', '!=', 'retail', false],
+      ['retail shop', 'contains', 'shop', true],
+      ['retail', 'not contains', 'x', true],
+      ['retail', 'starts', 're', true],
+      ['retail', 'ends', 're', false],
+      ['A123', 'matches', '\\d{3}', true],
+      ['10', '>', '9', true],
+      ['10', '<=', '9.5', false],
+      ['abc', '>=', '1', false],
+    ];
+    const script = [
+      'import json, sys',
+      'sys.path.insert(0, sys.argv[1] + "/resources")',
+      'from JouleLib import compare_values',
+      'out = []',
+      'for a, op, e in json.loads(sys.argv[2]):',
+      '    try:',
+      '        compare_values(a, op, e)',
+      '        out.append(True)',
+      '    except AssertionError:',
+      '        out.append(False)',
+      'print(json.dumps(out))',
+    ].join('\n');
+    const out = await new Promise<string>((res, rej) =>
+      execFile(python!, ['-c', script, dir, JSON.stringify(cases.map((c) => c.slice(0, 3)))], (err, stdout, stderr) => (err ? rej(new Error(stderr)) : res(stdout))),
+    );
+    expect(JSON.parse(out)).toEqual(cases.map((c) => c[3]));
   });
 
   function dateProject(): Project {
@@ -184,7 +226,7 @@ describe.runIf(python)('robot import', () => {
     expect(await externallyEdited(dir, saved)).toEqual(['tests/Test1.robot']);
     const { project: back } = await importFolder(dir, python!, saved);
     const ids = back.tests[0].steps.map((s) => s.id);
-    expect(ids.filter((id) => saved.tests[0].steps.some((s) => s.id === id))).toEqual(['c1', 'g1', 'if1', 'sh', 'nav', 'a1']);
+    expect(ids.filter((id) => saved.tests[0].steps.some((s) => s.id === id))).toEqual(['c1', 'g1', 'if1', 'if2', 'sh', 'nav', 'a1']);
     const raw = back.tests[0].steps.find((s): s is Extract<Step, { type: 'raw' }> => s.type === 'raw');
     expect(raw?.lines).toEqual(['Log    hand written']);
   });

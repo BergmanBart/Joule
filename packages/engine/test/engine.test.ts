@@ -277,6 +277,66 @@ describe('live runner', () => {
     expect(session.page!.url()).toBe(`${URL}shadow.html?user=alice`);
   }, 30_000);
 
+  it('takes the else branch when the condition is false', async () => {
+    await session.navigate(URL);
+    const events: StepEvent[] = [];
+    const fill = (id: string, value: string): Step => ({ id, name: '', type: 'element', mode: 'action', locator: { props: d('input', {}, { id: 'username' }), use: ['id'] }, action: { kind: 'fill', value } });
+    const ok = await new LiveRunner({
+      page: session.page!,
+      steps: [
+        {
+          id: 'if',
+          name: '',
+          type: 'if',
+          condition: { locator: { props: d('div', {}, { id: 'missing' }), use: ['id'] }, assertion: { property: 'state', operator: '==', expected: 'visible' } },
+          then: [fill('t', 'then')],
+          else: [fill('e', 'else')],
+        },
+      ],
+      keywords: [],
+      params: {},
+      timeoutSeconds: 2,
+      projectDir: tmpdir(),
+      screenshotDir: 'screenshots',
+      signal: new AbortController().signal,
+      onStep: (e) => events.push(e),
+      onPause: async () => {},
+    }).run();
+    expect(ok).toBe(true);
+    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['e', 'if']);
+    expect(await session.page!.inputValue('#username')).toBe('else');
+  }, 30_000);
+
+  it('compares a parameter to pick a branch', async () => {
+    await session.navigate(URL);
+    const events: StepEvent[] = [];
+    const fill = (id: string, value: string): Step => ({ id, name: '', type: 'element', mode: 'action', locator: { props: d('input', {}, { id: 'username' }), use: ['id'] }, action: { kind: 'fill', value } });
+    const ok = await new LiveRunner({
+      page: session.page!,
+      steps: [
+        {
+          id: 'if',
+          name: '',
+          type: 'if',
+          condition: { kind: 'value', value: '${AMOUNT}', operator: '>', expected: '${LIMIT}' },
+          then: [fill('t', 'then')],
+          else: [fill('e', 'else')],
+        },
+      ],
+      keywords: [],
+      params: { AMOUNT: '12', LIMIT: '9' },
+      timeoutSeconds: 2,
+      projectDir: tmpdir(),
+      screenshotDir: 'screenshots',
+      signal: new AbortController().signal,
+      onStep: (e) => events.push(e),
+      onPause: async () => {},
+    }).run();
+    expect(ok).toBe(true);
+    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['t', 'if']);
+    expect(await session.page!.inputValue('#username')).toBe('then');
+  }, 30_000);
+
   it('reports the failing step and stops', async () => {
     await session.navigate(URL);
     const events: StepEvent[] = [];

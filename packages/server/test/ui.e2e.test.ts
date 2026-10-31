@@ -186,18 +186,32 @@ describe.runIf(existsSync(join(UI, 'index.html')))('Joule app', () => {
     await page.locator('.step-row').last().click();
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByText('If statement').click();
-    await visible(page.getByText('Click the element for this step'));
+    await visible(page.getByText('Click the element the if should check'));
     // we are on the dashboard after the run: pick the "Welcome alice" heading
     const h1 = await centre(`${SITE}dashboard.html?username=alice`, '#welcome');
     await clickInView(h1.x, h1.y);
-    await expect.poll(() => page.getByText('Click the element for this step').count()).toBe(0);
+    await expect.poll(() => page.getByText('Click the element the if should check').count()).toBe(0);
     await visible(page.locator('.step-row.branch', { hasText: 'Then' }));
-    await page.locator('.step-row.branch', { hasText: 'Then' }).locator('button').click();
+    await text(page.locator('.details h3'), 'If h1 "Welcome alice" is visible');
     // a nested if inside the then-branch
+    await page.locator('.step-row.branch', { hasText: 'Then' }).click();
+    await visible(page.locator('.step-row.branch.active', { hasText: 'new steps go here' }));
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByText('If statement').click();
     await page.locator('.pick-banner button').click();
     await count(page.locator('.step-row.branch'), 4);
+    await visible(page.getByText('No element picked yet'));
+    // compare a parameter instead, then back to the element check
+    await page.locator('.details .segmented button', { hasText: 'Value' }).click();
+    await text(page.locator('.details h3'), /^If \$\{\w+\} is ""$/);
+    await page.locator('.details .segmented button', { hasText: 'Element' }).click();
+    await visible(page.getByText('No element picked yet'));
+    // a step in the else-branch of the outer if (the last branch row)
+    await page.locator('.step-row.branch', { hasText: 'Else' }).last().click();
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByText('Screenshot', { exact: true }).click();
+    await text(page.locator('.step-row').last().locator('.step-label'), 'Screenshot screenshot');
+    await count(page.locator('.step-row.branch', { hasText: 'empty' }), 2);
     await shot('09-nested-if');
   });
 

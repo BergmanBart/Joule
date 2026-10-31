@@ -27,7 +27,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { describeStep, findStep, newId, numberSteps, positionOf, type Step } from '@joule/core';
+import { describeStep, newId, numberSteps, positionOf, type Step } from '@joule/core';
 import { api } from '../api';
 import { Menu, MenuItem } from '../components/ui';
 import { TypeIcon } from '../stepMeta';
@@ -42,10 +42,12 @@ import {
   effectiveSelection,
   flatIds,
   groupSelected,
+  insertionPoint,
   moveSelected,
   paste,
   redo,
   runLive,
+  selectBranch,
   selectStep,
   undo,
   updateCurrentStep,
@@ -55,7 +57,7 @@ import {
 
 type Row =
   | { kind: 'step'; step: Step; depth: number }
-  | { kind: 'branch'; owner: string; branch: 'then' | 'else'; depth: number };
+  | { kind: 'branch'; owner: string; branch: 'then' | 'else'; depth: number; empty: boolean };
 
 function rowsOf(steps: Step[], depth = 0): Row[] {
   const out: Row[] = [];
@@ -63,8 +65,8 @@ function rowsOf(steps: Step[], depth = 0): Row[] {
     out.push({ kind: 'step', step, depth });
     if (step.type === 'group' && !step.collapsed) out.push(...rowsOf(step.steps, depth + 1));
     if (step.type === 'if') {
-      out.push({ kind: 'branch', owner: step.id, branch: 'then', depth: depth + 1 }, ...rowsOf(step.then, depth + 2));
-      out.push({ kind: 'branch', owner: step.id, branch: 'else', depth: depth + 1 }, ...rowsOf(step.else, depth + 2));
+      out.push({ kind: 'branch', owner: step.id, branch: 'then', depth: depth + 1, empty: !step.then.length }, ...rowsOf(step.then, depth + 2));
+      out.push({ kind: 'branch', owner: step.id, branch: 'else', depth: depth + 1, empty: !step.else.length }, ...rowsOf(step.else, depth + 2));
     }
   }
   return out;
@@ -87,6 +89,7 @@ export function StepsPanel() {
   const current = useStore((s) => s.current);
   const selected = useStore((s) => s.selected);
   const detail = useStore((s) => s.detail);
+  const branch = useStore((s) => s.branch);
   // not the whole run: Robot output lines would re-render every row
   const runSteps = useStore((s) => s.run.steps);
   const runKind = useStore((s) => s.run.kind);
@@ -101,6 +104,7 @@ export function StepsPanel() {
   const rows = useMemo(() => rowsOf(steps), [steps]);
   const numbers = useMemo(() => numberSteps(steps), [steps]);
   const effective = useMemo(() => effectiveSelection(steps, selected), [steps, selected]);
+  const insertAt = useMemo(() => insertionPoint(steps, detail, branch).target, [steps, detail, branch]);
   const container = current?.kind === 'keyword' ? project?.keywords.find((k) => k.id === current.id) : project?.tests.find((t) => t.id === current?.id);
   if (!project || !current || !container) return null;
 
@@ -170,28 +174,22 @@ export function StepsPanel() {
     const dropClass = drop?.key === key ? ` drop-${drop.pos}` : '';
     const guides = Array.from({ length: row.depth }, (_, d) => <span key={d} className="indent-guide" style={{ left: 18 + d * INDENT }} />);
     if (row.kind === 'branch') {
+      const active = insertAt === key;
       rendered.push(
         <div
           key={key}
-          className={`step-row branch${dropClass}`}
+          className={`step-row branch${active ? ' active' : ''}${dropClass}`}
           style={{ paddingLeft: 12 + row.depth * INDENT }}
+          title={`Click, then record in the browser view or use Add to put steps in ${row.branch === 'then' ? 'Then' : 'Else'}`}
+          onClick={() => selectBranch(row.owner, row.branch)}
           onDragOver={(e) => onDragOver(e, row, key)}
           onDragLeave={() => setDrop(null)}
           onDrop={(e) => onDrop(e, row)}
         >
           {guides}
           {row.branch === 'then' ? 'Then' : 'Else'}
-          <button
-            className="icon-btn small"
-            title={`Add a step to ${row.branch}`}
-            onClick={() => {
-              useStore.setState({ detail: undefined });
-              const wait: Step = { id: newId('s'), name: '', type: 'wait', wait: { kind: 'time', seconds: 1 } };
-              moveAfterInsert(row.owner, row.branch, wait);
-            }}
-          >
-            <Plus size={12} />
-          </button>
+          <span className="branch-hint">{row.branch === 'then' ? 'when the condition is true' : 'otherwise'}</span>
+          {active ? <span className="branch-hint active">new steps go here</span> : row.empty && <span className="branch-hint">empty, click to add steps</span>}
         </div>,
       );
       return;
@@ -386,11 +384,3 @@ export function StepsPanel() {
   );
 }
 
-/** Add a step at the end of an if branch. */
-function moveAfterInsert(ifId: string, branch: 'then' | 'else', step: Step) {
-  const { project, current } = useStore.getState();
-  const s = findStep(containerSteps(project, current), ifId);
-  if (!s || s.type !== 'if') return;
-  updateCurrentStep(ifId, (x) => (x.type === 'if' ? { ...x, [branch]: [...x[branch], step] } : x));
-  useStore.setState({ selected: [step.id], detail: step.id, anchor: step.id });
-}

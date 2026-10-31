@@ -1,5 +1,5 @@
 import { ENVIRONMENTS } from '../model';
-import type { Assertion, CustomCallStep, ElementStep, Environment, Keyword, Locator, Parameter, Project, Settings, Step, Test } from '../model';
+import type { Assertion, Condition, CustomCallStep, ElementStep, Environment, Keyword, Locator, Parameter, Project, Settings, Step, Test } from '../model';
 import { PARAM_NAME } from '../factory';
 import { DEFAULT_DATE_FORMAT } from '../date';
 import { isComputed, parameterRefs, parameterValue, referenceOrder } from '../params';
@@ -20,7 +20,7 @@ const RESERVED = new Set(
     'Press Keys', 'Get Text', 'Get Property', 'Get Attribute', 'Get Element Count', 'Get Element States', 'Sleep',
     'Wait For Load State', 'Wait For Elements State', 'Take Screenshot', 'Go To', 'Pause For Key', 'New Page', 'New Browser',
     'New Context', 'Close Browser', 'Open Joule Browser', 'Run Keyword And Return Status', 'Set Browser Timeout', 'Log',
-    'Random From Regex', 'Relative Date', 'Set Suite Variable', SUITE_SETUP,
+    'Random From Regex', 'Relative Date', 'Compare Values', 'Set Suite Variable', SUITE_SETUP,
   ].map(normalize),
 );
 
@@ -73,6 +73,12 @@ function assertionCells(selector: string, a: Assertion): string[] {
       return ['Get Element States', selector, negative ? 'not contains' : 'contains', expected];
     }
   }
+}
+
+/** The keyword call that passes when an if condition holds. */
+function conditionCells(c: Condition): string[] {
+  if (c.kind === 'value') return ['Compare Values', arg(c.value), c.operator, arg(c.expected)];
+  return assertionCells(sel(c.locator), c.assertion);
 }
 
 function elementCells(step: ElementStep): string[] {
@@ -140,7 +146,7 @@ function stepLines(step: Step, ctx: Ctx, depth: number): string[] {
     }
     case 'if': {
       const v = `\${condition_${++ctx.ifCounter.n}}`;
-      const cond = assertionCells(sel(step.condition.locator), step.condition.assertion);
+      const cond = conditionCells(step.condition);
       const out = [line(`${v}=`, 'Run Keyword And Return Status', ...cond), line('IF', v)];
       out.push(...(step.then.length ? stepsLines(step.then, ctx, depth + 1) : [pad + IND + 'No Operation']));
       if (step.else.length) out.push(line('ELSE'), ...stepsLines(step.else, ctx, depth + 1));
@@ -162,7 +168,7 @@ export function normalizeRow(line: string): string {
 export function stepSignature(step: Step, keywordNames: Map<string, string> = new Map()): string | undefined {
   if (step.type === 'group') return undefined;
   if (step.type === 'if') {
-    const cond = assertionCells(sel(step.condition.locator), step.condition.assertion);
+    const cond = conditionCells(step.condition);
     return normalizeRow(row('Run Keyword And Return Status', ...cond));
   }
   const ctx: Ctx = { keywords: [], keywordNames, namer: new KeywordNamer(), local: [], ifCounter: { n: 0 } };
@@ -362,7 +368,7 @@ except ImportError:
     import sre_constants as _sre
     import sre_parse as _sre_parse
 
-__all__ = ["pause_for_key", "random_from_regex", "relative_date"]
+__all__ = ["compare_values", "pause_for_key", "random_from_regex", "relative_date"]
 
 # Same character sets and repeat cap as Joule's own generator (random.ts).
 _PRINTABLE = [chr(c) for c in range(0x20, 0x7F)]
@@ -549,6 +555,35 @@ def _format_date(d, fmt):
 def relative_date(expression, fmt=DEFAULT_DATE_FORMAT):
     """The date of an expression such as "today + 5wd", "now - 2h" or "2026-12-25", written out in fmt (e.g. dd-MM-yyyy)."""
     return _format_date(_evaluate(expression), fmt)
+
+
+@keyword("Compare Values")
+def compare_values(actual, operator, expected):
+    """Fails unless actual <operator> expected holds, e.g. "\${ORDER_TYPE}  ==  retail" or "\${AMOUNT}  >=  10"."""
+    if operator in (">", "<", ">=", "<="):
+        try:
+            a, e = float(actual), float(expected)
+        except ValueError:
+            raise AssertionError("Cannot compare '%s' %s '%s': not numbers" % (actual, operator, expected))
+        ok = {">": a > e, "<": a < e, ">=": a >= e, "<=": a <= e}[operator]
+    elif operator == "==":
+        ok = actual == expected
+    elif operator == "!=":
+        ok = actual != expected
+    elif operator == "contains":
+        ok = expected in actual
+    elif operator == "not contains":
+        ok = expected not in actual
+    elif operator == "starts":
+        ok = actual.startswith(expected)
+    elif operator == "ends":
+        ok = actual.endswith(expected)
+    elif operator == "matches":
+        ok = re.search(expected, actual) is not None
+    else:
+        raise ValueError("Unknown operator '%s'" % operator)
+    if not ok:
+        raise AssertionError("'%s' %s '%s' is false" % (actual, operator, expected))
 
 
 @keyword("Pause For Key")

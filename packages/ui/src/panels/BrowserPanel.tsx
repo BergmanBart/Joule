@@ -8,7 +8,7 @@ import { containerSteps, currentParams, effectiveSelection, goHome, resetBrowser
 export function stepLocator(s: Step): Locator | undefined {
   if (s.type === 'element') return s.locator;
   if (s.type === 'wait' && s.wait.kind === 'element') return s.wait.locator;
-  if (s.type === 'if') return s.condition.locator;
+  if (s.type === 'if') return s.condition.kind === 'value' ? undefined : s.condition.locator;
   return undefined;
 }
 
@@ -87,6 +87,7 @@ function usePickConstraint() {
 function pickBanner(t: NonNullable<PickTarget>): string {
   if (t.part?.kind === 'parent') return 'Click a parent of the element (outlined in purple)';
   if (t.part?.kind === 'has') return 'Click an element inside the parent (outlined in purple)';
+  if (t.field === 'condition') return 'Click the element the if should check';
   return 'Click the element for this step';
 }
 

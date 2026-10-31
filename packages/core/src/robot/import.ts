@@ -5,7 +5,7 @@
 import { customKeywordsFrom, type CustomKeyword, type ParsedCustomFile } from '../custom';
 import { newId } from '../ids';
 import { ENVIRONMENTS, Project as ProjectSchema } from '../model';
-import type { Action, Assertion, AssertProperty, Keyword, Locator, Operator, Parameter, Project, Step, Test } from '../model';
+import type { Action, Assertion, AssertProperty, Condition, Keyword, Locator, Operator, Parameter, Project, Step, Test } from '../model';
 import { OPERATORS } from '../model';
 import { DEFAULT_DATE_FORMAT } from '../date';
 import { parameterValue } from '../params';
@@ -104,6 +104,14 @@ function assertionFrom(kw: string, args: string[]): { locator: Locator; assertio
     }
   }
   return undefined;
+}
+
+/** The condition call of an if → its condition. */
+function conditionFrom(kw: string, args: string[]): Condition | undefined {
+  if (kw !== 'comparevalues') return assertionFrom(kw, args);
+  const op = operator(args[1]);
+  if (args.length !== 3 || !op) return undefined;
+  return { kind: 'value', value: unarg(args[0]), operator: op, expected: unarg(args[2]) };
 }
 
 function actionFrom(kw: string, args: string[]): { locator: Locator; action: Action } | undefined {
@@ -268,7 +276,7 @@ function convertBody(body: ParsedItem[], scope: Scope): Step[] {
     if (item.assign.length === 1 && norm(item.keyword) === 'runkeywordandreturnstatus' && next?.kind === 'if') {
       const v = item.assign[0].replace(/=\s*$/, '').trim();
       const [kwName, ...kwArgs] = item.args;
-      const cond = kwName ? assertionFrom(norm(kwName), kwArgs) : undefined;
+      const cond = kwName ? conditionFrom(norm(kwName), kwArgs) : undefined;
       const branches = next.branches;
       const simple = branches[0].condition?.trim() === v && branches.length <= 2 && (branches.length === 1 || branches[1].condition === null);
       if (cond && simple) {

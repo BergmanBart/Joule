@@ -234,9 +234,11 @@ export class LiveRunner {
       case 'group':
         return this.steps(step.steps, depth + 1);
       case 'if': {
-        const a = step.condition.assertion;
-        const r = await checkAssertion(page, this.sel(step.condition.locator), a, this.v(a.expected), this.timeout);
-        return this.steps(r.ok ? step.then : step.else, depth + 1);
+        const c = step.condition;
+        let ok: boolean;
+        if (c.kind === 'value') ok = compare(this.v(c.value), c.operator, this.v(c.expected));
+        else ok = (await checkAssertion(page, this.sel(c.locator), c.assertion, this.v(c.assertion.expected), this.timeout)).ok;
+        return this.steps(ok ? step.then : step.else, depth + 1);
       }
     }
   }

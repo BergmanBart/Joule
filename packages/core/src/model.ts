@@ -171,9 +171,25 @@ export const CustomCallStep = z.object({
 });
 export type CustomCallStep = z.infer<typeof CustomCallStep>;
 
-/** Condition of an if step: an assertion on an element. */
-export const Condition = z.object({ locator: Locator, assertion: Assertion });
+/** If condition on the page: the state or number of an element (older projects may check other properties). */
+export const ElementCondition = z.object({ kind: z.literal('element').optional(), locator: Locator, assertion: Assertion });
+export type ElementCondition = z.infer<typeof ElementCondition>;
+
+/** If condition on a value: `value` (usually a ${param}) compared to `expected`; both may contain ${param}. */
+export const ValueCondition = z.object({
+  kind: z.literal('value'),
+  value: z.string().default(''),
+  operator: Operator.default('=='),
+  expected: z.string().default(''),
+});
+export type ValueCondition = z.infer<typeof ValueCondition>;
+
+/** Condition of an if step; a missing kind means element. */
+export const Condition = z.union([ValueCondition, ElementCondition]);
 export type Condition = z.infer<typeof Condition>;
+
+/** Operators that compare numbers. */
+export const NUMBER_OPERATORS: readonly Operator[] = ['==', '!=', '>', '<', '>=', '<='];
 
 export type GroupStep = { id: string; name: string; type: 'group'; collapsed: boolean; steps: Step[] };
 export type IfStep = { id: string; name: string; type: 'if'; condition: Condition; then: Step[]; else: Step[] };

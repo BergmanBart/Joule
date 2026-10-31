@@ -13,19 +13,27 @@ import {
   isRequired,
   isSelect,
   isTextInput,
+  newElementCondition,
+  ASSERT_PROPERTIES,
+  NUMBER_OPERATORS,
   OPERATORS,
   scopeSelector,
   stepSignature,
   walk,
   type ActionKind,
   type Assertion,
+  type AssertProperty,
   type BaseLocator,
+  type Condition,
+  type ElementCondition,
   type CustomCallStep,
   type CustomKeywordArg,
   type ElementDescriptor,
   type Locator,
+  type Operator,
   type Scope,
   type Step,
+  type ValueCondition,
 } from '@joule/core';
 import { api } from '../api';
 import { NumberField, TextField } from '../components/ui';
@@ -326,18 +334,50 @@ function LocatorEditor({ locator, onChange, pickField, stepId }: { locator: Loca
   );
 }
 
-function AssertionEditor({ assertion, onChange }: { assertion: Assertion; onChange: (a: Assertion) => void }) {
+const PROPERTY_NAMES: Record<AssertProperty, string> = {
+  text: 'Text',
+  value: 'Value (inputs)',
+  attribute: 'Attribute',
+  count: 'Number of elements',
+  state: 'State',
+};
+
+/** The assertion after picking another property: an expected value that fits it. */
+function withProperty(a: Assertion, property: AssertProperty): Assertion {
+  if (property === 'state') return { ...a, property, operator: a.operator === '!=' ? '!=' : '==', expected: 'visible' };
+  if (property === 'count') {
+    // "is visible" becomes "at least 1"
+    const operator = a.property !== 'state' && NUMBER_OPERATORS.includes(a.operator) ? a.operator : '>=';
+    return { ...a, property, operator, expected: /^\d+$/.test(a.expected) ? a.expected : '1' };
+  }
+  return { ...a, property, expected: a.property === 'state' ? '' : a.expected };
+}
+
+function AssertionEditor({
+  assertion,
+  onChange,
+  label = 'Assert that',
+  properties = ASSERT_PROPERTIES,
+}: {
+  assertion: Assertion;
+  onChange: (a: Assertion) => void;
+  label?: string;
+  properties?: readonly AssertProperty[];
+}) {
+  // a property no longer offered (e.g. a text check in an older if) stays visible so it can be changed
+  const shown = properties.includes(assertion.property) ? properties : [...properties, assertion.property];
+  const operators = assertion.property === 'count' ? NUMBER_OPERATORS : OPERATORS;
   return (
     <>
       <div className="field">
-        <label>Assert that</label>
+        <label>{label}</label>
         <div className="row">
-          <select className="select grow" value={assertion.property} onChange={(e) => onChange({ ...assertion, property: e.target.value as Assertion['property'], expected: e.target.value === 'state' ? 'visible' : assertion.expected })}>
-            <option value="text">Text</option>
-            <option value="value">Value (inputs)</option>
-            <option value="attribute">Attribute</option>
-            <option value="count">Number of elements</option>
-            <option value="state">State</option>
+          <select className="select grow" value={assertion.property} onChange={(e) => onChange(withProperty(assertion, e.target.value as AssertProperty))}>
+            {shown.map((p) => (
+              <option key={p} value={p}>
+                {PROPERTY_NAMES[p]}
+              </option>
+            ))}
           </select>
           {assertion.property === 'attribute' && <TextField value={assertion.name ?? ''} onCommit={(v) => onChange({ ...assertion, name: v })} placeholder="e.g. title" />}
         </div>
@@ -362,7 +402,7 @@ function AssertionEditor({ assertion, onChange }: { assertion: Assertion; onChan
           <div className="field">
             <label>Operator</label>
             <select className="select" value={assertion.operator} onChange={(e) => onChange({ ...assertion, operator: e.target.value as Assertion['operator'] })}>
-              {OPERATORS.map((o) => (
+              {operators.map((o) => (
                 <option key={o}>{o}</option>
               ))}
             </select>
@@ -484,6 +524,84 @@ function WaitDetails({ step, upd }: { step: Extract<Step, { type: 'wait' }>; upd
 }
 
 /** Documentation and file of the custom keyword a step calls, shown right under the title. */
+function IfDetails({ step, upd }: { step: Extract<Step, { type: 'if' }>; upd: Upd }) {
+  const params = useParams();
+  // the condition of the other kind, so switching back and forth does not lose a picked element
+  const [other, setOther] = useState<Condition | undefined>();
+  const c = step.condition;
+  const setCondition = (condition: Condition) => upd((s) => (s.type === 'if' ? { ...s, condition } : s));
+  const switchTo = (kind: 'element' | 'value') => {
+    if ((c.kind ?? 'element') === kind) return;
+    const first = Object.keys(params)[0];
+    setOther(c);
+    setCondition(other ?? (kind === 'value' ? { kind, value: first ? `\${${first}}` : '', operator: '==', expected: '' } : newElementCondition()));
+    if (kind === 'value' && useStore.getState().pickTarget?.stepId === step.id) useStore.setState({ pickTarget: null });
+  };
+  return (
+    <>
+      <div className="notice info">
+        Runs the Then steps when the condition is true, otherwise the Else steps. To fill a branch, click Then or Else in the step list, then record in the browser view or use Add. You can also drag steps into a branch.
+      </div>
+      <div className="field">
+        <label>Check</label>
+        <div className="segmented" style={{ alignSelf: 'flex-start' }}>
+          <button className={c.kind !== 'value' ? 'on' : ''} onClick={() => switchTo('element')} title="The state or number of an element on the page">
+            Element
+          </button>
+          <button className={c.kind === 'value' ? 'on' : ''} onClick={() => switchTo('value')} title="Compare a parameter (or any text) with a value">
+            Value
+          </button>
+        </div>
+      </div>
+      {c.kind === 'value' ? <ValueConditionEditor condition={c} onChange={setCondition} /> : <ElementConditionEditor step={step} condition={c} onChange={setCondition} />}
+    </>
+  );
+}
+
+function ElementConditionEditor({ step, condition, onChange }: { step: Step; condition: ElementCondition; onChange: (c: ElementCondition) => void }) {
+  const loc = condition.locator;
+  // what a new if starts with: the whole page, which is always visible
+  const unpicked = !loc.custom && !loc.within && loc.props.tag === 'body' && loc.use.join() === 'tag';
+  return (
+    <>
+      {unpicked && (
+        <div className="notice warn">
+          <AlertTriangle size={14} /> No element picked yet: the condition checks the whole page, so it is always true. Use Pick element below.
+        </div>
+      )}
+      <div className="field">
+        <label>Element to check</label>
+      </div>
+      <LocatorEditor locator={loc} onChange={(l) => onChange({ ...condition, locator: l })} pickField="condition" stepId={step.id} />
+      <AssertionEditor label="Condition: check its" properties={['state', 'count']} assertion={condition.assertion} onChange={(a) => onChange({ ...condition, assertion: a })} />
+    </>
+  );
+}
+
+function ValueConditionEditor({ condition, onChange }: { condition: ValueCondition; onChange: (c: ValueCondition) => void }) {
+  return (
+    <>
+      <div className="field">
+        <label>Value (text or $&#123;parameter&#125;)</label>
+        <ValueField value={condition.value} onCommit={(v) => onChange({ ...condition, value: v })} placeholder="${PARAMETER}" />
+        {!condition.value && <div className="field-hint err">A value is required</div>}
+      </div>
+      <div className="field">
+        <label>Operator</label>
+        <select className="select" value={condition.operator} onChange={(e) => onChange({ ...condition, operator: e.target.value as Operator })}>
+          {OPERATORS.map((o) => (
+            <option key={o}>{o}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label>Compare with (text or $&#123;parameter&#125;)</label>
+        <ValueField value={condition.expected} onCommit={(v) => onChange({ ...condition, expected: v })} />
+      </div>
+    </>
+  );
+}
+
 function CustomKeywordDoc({ step }: { step: CustomCallStep }) {
   const def = findCustomKeyword(useStore((s) => s.customKeywords), step);
   return (
@@ -622,18 +740,7 @@ function StepDetails({ step }: { step: Step }) {
         </>
       );
     case 'if':
-      return (
-        <>
-          <div className="notice info">The Then steps run when the condition is true, the Else steps otherwise. Drag steps into the branches, or use + next to Then / Else.</div>
-          <AssertionEditor assertion={step.condition.assertion} onChange={(a) => upd((s) => (s.type === 'if' ? { ...s, condition: { ...s.condition, assertion: a } } : s))} />
-          <LocatorEditor
-            locator={step.condition.locator}
-            onChange={(l) => upd((s) => (s.type === 'if' ? { ...s, condition: { ...s.condition, locator: l } } : s))}
-            pickField="condition"
-            stepId={step.id}
-          />
-        </>
-      );
+      return <IfDetails key={step.id} step={step} upd={upd} />;
     case 'group':
       return (
         <>

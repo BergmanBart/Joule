@@ -1,6 +1,6 @@
 import { isRequired, type CustomKeyword } from './custom';
 import { newId } from './ids';
-import type { CustomCallStep, ElementDescriptor, Keyword, Locator, Project, Step, Test } from './model';
+import type { Condition, CustomCallStep, ElementCondition, ElementDescriptor, Keyword, Locator, Operator, Project, Step, Test } from './model';
 import { Project as ProjectSchema, Settings } from './model';
 import { defaultUse } from './selector';
 
@@ -53,6 +53,14 @@ export function isCheckable(d: ElementDescriptor): boolean {
   return d.tag === 'input' && (type === 'checkbox' || type === 'radio');
 }
 
+/** Condition of a new if: the whole page is visible, until an element is picked. */
+export function newElementCondition(): ElementCondition {
+  return {
+    locator: { props: { tag: 'body', classes: [], attributes: {} }, use: ['tag'] },
+    assertion: { property: 'state', operator: '==', expected: 'visible' },
+  };
+}
+
 export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'navigate' | 'group' | 'if' | 'keywordCall', extra: { keywordId?: string } = {}): Step {
   const id = newId('s');
   switch (type) {
@@ -71,10 +79,7 @@ export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'navigate' | 'gr
         id,
         name: '',
         type,
-        condition: {
-          locator: { props: { tag: 'body', classes: [], attributes: {} }, use: ['tag'] },
-          assertion: { property: 'state', operator: '==', expected: 'visible' },
-        },
+        condition: newElementCondition(),
         then: [],
         else: [],
       };
@@ -114,6 +119,42 @@ const ACTION_LABEL: Record<string, string> = {
   press: 'Press key on',
 };
 
+const OPERATOR_LABEL: Record<Operator, string> = {
+  '==': 'is',
+  '!=': 'is not',
+  contains: 'contains',
+  'not contains': 'does not contain',
+  starts: 'starts with',
+  ends: 'ends with',
+  matches: 'matches',
+  '>': 'is more than',
+  '<': 'is less than',
+  '>=': 'is at least',
+  '<=': 'is at most',
+};
+
+/** An if condition as a sentence, e.g. `button "Save" is visible`, `number of li is at least 2` or `${TYPE} is "retail"`. */
+function conditionLabel(c: Condition): string {
+  if (c.kind === 'value') {
+    const numeric = ['>', '<', '>=', '<='].includes(c.operator);
+    const expected = numeric ? c.expected : `"${c.expected}"`;
+    return `${c.value || '(empty)'} ${OPERATOR_LABEL[c.operator]} ${expected}`;
+  }
+  const el = locatorLabel(c.locator);
+  const a = c.assertion;
+  const op = OPERATOR_LABEL[a.operator];
+  switch (a.property) {
+    case 'state':
+      return `${el} ${a.operator === '!=' || a.operator === 'not contains' ? 'is not' : 'is'} ${a.expected}`;
+    case 'count':
+      return `number of ${el} ${op} ${a.expected}`;
+    case 'attribute':
+      return `${el} @${a.name ?? ''} ${op} "${a.expected}"`;
+    default:
+      return `${el} ${a.property} ${op} "${a.expected}"`;
+  }
+}
+
 /** Human readable label; the user-given name wins when set. */
 export function describeStep(step: Step, keywords: Keyword[] = []): string {
   if (step.name) return step.name;
@@ -142,10 +183,8 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
       return `Go to ${step.url}`;
     case 'group':
       return 'Group';
-    case 'if': {
-      const a = step.condition.assertion;
-      return `If ${locatorLabel(step.condition.locator)} ${a.property} ${a.operator} ${a.expected}`;
-    }
+    case 'if':
+      return `If ${conditionLabel(step.condition)}`;
     case 'keywordCall':
       return keywords.find((k) => k.id === step.keywordId)?.name ?? 'Missing keyword';
     case 'customCall': {

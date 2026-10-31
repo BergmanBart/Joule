@@ -372,6 +372,25 @@ describe('robot generation', () => {
     `);
   });
 
+  it('compares a parameter in an if', () => {
+    const step: Step = {
+      id: 'v',
+      name: '',
+      type: 'if',
+      condition: { kind: 'value', value: '${USERNAME}', operator: '!=', expected: 'bob' },
+      then: [{ id: 'pz', name: '', type: 'pause' }],
+      else: [],
+    };
+    expect(describeStep(step)).toBe('If ${USERNAME} is not "bob"');
+    expect(describeStep({ ...step, condition: { kind: 'value', value: '${AMOUNT}', operator: '>=', expected: '10' } })).toBe('If ${AMOUNT} is at least 10');
+    const p = sampleProject();
+    p.tests[0].steps = [step];
+    const files = generateRobotFiles(Project.parse(p));
+    expect(files['tests/Test1.robot']).toContain('${condition_1}=    Run Keyword And Return Status    Compare Values    ${USERNAME}    !=    bob');
+    // projects saved before value conditions existed still parse as element conditions
+    expect(Project.parse(JSON.parse(JSON.stringify(sampleProject()))).tests[0].steps.find((s) => s.type === 'if')).toHaveProperty('condition.locator');
+  });
+
   it('puts linked groups in keywords.resource', () => {
     expect(files['resources/keywords.resource']).toContain('Login\n    [Documentation]    Joule keyword kw1\n    Fill Text    css=input[name="user"]    ${USERNAME}');
   });

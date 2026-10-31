@@ -7,6 +7,7 @@ import {
   filterSteps,
   findStep,
   insertSteps,
+  listById,
   moveSteps,
   newId,
   newCustomCall,
@@ -92,6 +93,8 @@ interface State {
   selected: string[];
   anchor?: string;
   detail?: string;
+  /** If branch new steps go into ("<ifId>:then" or "<ifId>:else"), chosen by clicking its Then / Else row. */
+  branch?: string;
   pickTarget: PickTarget;
   /** Search details section folded away in the details panel. */
   searchCollapsed: boolean;
@@ -320,7 +323,7 @@ function stableStartUrl(): string {
 
 export function selectContainer(c: Container) {
   const before = stableStartUrl();
-  set({ current: c, selected: [], detail: undefined, anchor: undefined, pickTarget: null });
+  set({ current: c, selected: [], detail: undefined, anchor: undefined, branch: undefined, pickTarget: null });
   if (before !== stableStartUrl()) goHome();
 }
 
@@ -412,21 +415,26 @@ export function selectStep(id: string, mods: { ctrl?: boolean; shift?: boolean }
     const b = ids.indexOf(id);
     if (a >= 0 && b >= 0) {
       const range = ids.slice(Math.min(a, b), Math.max(a, b) + 1);
-      set({ selected: mods.ctrl ? [...new Set([...selected, ...range])] : range, detail: id });
+      set({ selected: mods.ctrl ? [...new Set([...selected, ...range])] : range, detail: id, branch: undefined });
       return;
     }
   }
   if (mods.ctrl) {
     const has = selected.includes(id);
     const next = has ? selected.filter((x) => x !== id) : [...selected, id];
-    set({ selected: next, anchor: id, detail: has ? next[next.length - 1] : id });
+    set({ selected: next, anchor: id, detail: has ? next[next.length - 1] : id, branch: undefined });
     return;
   }
-  set({ selected: [id], anchor: id, detail: id, pickTarget: null });
+  set({ selected: [id], anchor: id, detail: id, branch: undefined, pickTarget: null });
 }
 
 export function clearSelection() {
-  set({ selected: [], detail: undefined, anchor: undefined, pickTarget: null });
+  set({ selected: [], detail: undefined, anchor: undefined, branch: undefined, pickTarget: null });
+}
+
+/** Make the Then or Else branch of an if the place where recorded and added steps go. */
+export function selectBranch(ifId: string, branch: 'then' | 'else') {
+  set({ selected: [], detail: undefined, anchor: undefined, branch: `${ifId}:${branch}`, pickTarget: null });
 }
 
 /** Selected ids plus everything inside selected groups/ifs. */
@@ -441,9 +449,13 @@ export function effectiveSelection(steps: Step[], selected: string[]): Set<strin
 
 // ---------- step editing ----------
 
-/** Where new steps go: inside the selected container, otherwise after the detail step, otherwise at the end. */
-function insertionPoint(steps: Step[]): { target: string; index: number } {
-  const { detail } = get();
+/**
+ * Where new steps go: at the end of the chosen if branch, inside the selected container,
+ * otherwise after the detail step, otherwise at the end.
+ */
+export function insertionPoint(steps: Step[], detail: string | undefined, branch: string | undefined): { target: string; index: number } {
+  const list = branch ? listById(steps, branch) : undefined;
+  if (branch && list) return { target: branch, index: list.length };
   const s = detail ? findStep(steps, detail) : undefined;
   if (!s) return { target: 'root', index: steps.length };
   if (s.type === 'group' && !s.collapsed) return { target: s.id, index: s.steps.length };
@@ -454,9 +466,10 @@ function insertionPoint(steps: Step[]): { target: string; index: number } {
 
 export function addSteps(items: Step[], select = true) {
   const steps = containerSteps(get().project, get().current);
-  const at = insertionPoint(steps);
+  const at = insertionPoint(steps, get().detail, get().branch);
   editSteps((s) => insertSteps(s, at.target, at.index, items));
-  if (select && items.length) set({ selected: items.map((i) => i.id), detail: items[items.length - 1].id, anchor: items[0].id });
+  // the next steps follow the last one added, so they stay in the same branch
+  if (select && items.length) set({ selected: items.map((i) => i.id), detail: items[items.length - 1].id, anchor: items[0].id, branch: undefined });
 }
 
 export function addCustomCall(def: CustomKeyword) {
@@ -474,7 +487,7 @@ export function addStepOfType(type: Parameters<typeof newStep>[0], extra?: { key
 export function mapLocator(s: Step, field: NonNullable<PickTarget>['field'], fn: (l: Locator) => Locator): Step {
   if (field === 'element' && s.type === 'element') return { ...s, locator: fn(s.locator) };
   if (field === 'wait' && s.type === 'wait' && s.wait.kind === 'element') return { ...s, wait: { ...s.wait, locator: fn(s.wait.locator) } };
-  if (field === 'condition' && s.type === 'if') return { ...s, condition: { ...s.condition, locator: fn(s.condition.locator) } };
+  if (field === 'condition' && s.type === 'if' && s.condition.kind !== 'value') return { ...s, condition: { ...s.condition, locator: fn(s.condition.locator) } };
   return s;
 }
 
