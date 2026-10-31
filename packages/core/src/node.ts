@@ -34,9 +34,7 @@ export async function saveProject(dir: string, project: Project): Promise<Projec
   const files = generateRobotFiles(project);
   const hashes: Record<string, string> = {};
   for (const [rel, content] of Object.entries(files)) {
-    const path = join(dir, rel);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, content, 'utf8');
+    await writeIfChanged(join(dir, rel), content);
     hashes[rel] = sha256(content);
   }
   for (const [rel, oldHash] of Object.entries(project.generatedHashes)) {
@@ -49,10 +47,20 @@ export async function saveProject(dir: string, project: Project): Promise<Projec
   await mkdir(isAbsolute(shots) ? shots : join(dir, shots), { recursive: true });
   // where users drop their own keyword files (shown under Reusable keywords → Custom Keywords)
   await mkdir(join(dir, CUSTOM_KEYWORDS_DIR), { recursive: true });
-  await writeFile(join(dir, PROJECT_FILE), JSON.stringify(saved, null, 2) + '\n', 'utf8');
+  await writeIfChanged(join(dir, PROJECT_FILE), JSON.stringify(saved, null, 2) + '\n');
   // Old generated helpers (uitester.resource, UITesterLib.py) went with the stale-file cleanup above.
   await rm(join(dir, LEGACY_PROJECT_FILE), { force: true });
   return saved;
+}
+
+/**
+ * Autosave runs after every edit, which usually changes one test: rewriting all files would make sync clients
+ * (OneDrive) and virus scanners process every one of them each time.
+ */
+async function writeIfChanged(path: string, content: string): Promise<void> {
+  if ((await readFile(path, 'utf8').catch(() => undefined)) === content) return;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, 'utf8');
 }
 
 /** Generated files changed outside Joule since the last save. */

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { chromium, firefox, type Browser, type BrowserContext, type CDPSession, type ElementHandle, type Page } from 'playwright-core';
+import { chromium, firefox, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import type { BrowserName, ElementDescriptor } from '@joule/core';
 
 const OVERLAY = readFileSync(new URL('./overlay.js', import.meta.url), 'utf8');
@@ -69,6 +69,12 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   page?: Page;
   private cdp?: CDPSession;
   private pollTimer?: NodeJS.Timeout;
+  /** Bumped by every stop of the frame stream, so a start that was overtaken leaves nothing running. */
+  private streamGen = 0;
+  /** False while nobody shows the view: the browser then sends no frames at all. */
+  private streaming = true;
+  /** Size the view is shown at: frames are scaled down to fit, which is less to encode, send and decode. */
+  private frameSize?: { width: number; height: number };
   private mode: ViewMode = 'interact';
   private items: HighlightItem[] = [];
   private refreshQueued = false;
@@ -83,16 +89,31 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     await this.stop();
     this.options = options;
     this.browser = await launchBrowser(options.browser, true);
-    this.context = await this.browser.newContext({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1 });
-    await this.context.exposeBinding('__joulePick', (_src, d: ElementDescriptor) => {
+    await this.openContext();
+    if (url) await this.navigate(url);
+  }
+
+  /** Swap in a fresh context, like the clean browser a real test run gets: cookies, storage and cache are gone. */
+  async reset(url?: string): Promise<void> {
+    if (!this.browser) return;
+    const old = this.context;
+    await this.openContext();
+    await old?.close().catch(() => {});
+    if (url) await this.navigate(url);
+  }
+
+  private async openContext(): Promise<void> {
+    const { width, height } = this.options!;
+    const context = await this.browser!.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+    await context.exposeBinding('__joulePick', (_src, d: ElementDescriptor) => {
       this.emit('pick', d);
     });
-    await this.context.exposeBinding('__jouleChanged', () => this.refresh());
-    await this.context.exposeBinding('__jouleHello', () => ({ mode: this.mode }));
-    await this.context.addInitScript(OVERLAY);
-    this.context.on('page', (p) => void this.attach(p));
-    await this.attach(await this.context.newPage());
-    if (url) await this.navigate(url);
+    await context.exposeBinding('__jouleChanged', () => this.refresh());
+    await context.exposeBinding('__jouleHello', () => ({ mode: this.mode }));
+    await context.addInitScript(OVERLAY);
+    context.on('page', (p) => void this.attach(p));
+    this.context = context;
+    await this.attach(await context.newPage());
   }
 
   private async attach(page: Page): Promise<void> {
@@ -108,41 +129,69 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
       if (others.length) void this.attach(others[others.length - 1]);
       else this.emit('closed');
     });
-    await this.startStream(page);
+    if (this.streaming) await this.startStream(page);
     if (previous && previous !== page) this.emit('url', page.url());
   }
 
+  /** Pause the frame stream while nobody shows the view; resuming streams the current page again. */
+  async setStreaming(on: boolean): Promise<void> {
+    if (on === this.streaming) return;
+    this.streaming = on;
+    const page = this.page;
+    if (!on) await this.stopStream();
+    else if (page && !page.isClosed()) await this.startStream(page);
+  }
+
+  async setFrameSize(size: { width: number; height: number } | undefined): Promise<void> {
+    if (size?.width === this.frameSize?.width && size?.height === this.frameSize?.height) return;
+    this.frameSize = size;
+    const page = this.page;
+    if (this.streaming && page && !page.isClosed()) await this.startStream(page);
+  }
+
   private async startStream(page: Page): Promise<void> {
-    await this.stopStream();
+    const gen = await this.stopStream();
     if (this.options?.browser === 'firefox') {
-      // No CDP screencast in Firefox: poll screenshots.
+      // No CDP screencast in Firefox: poll screenshots and pass on the ones that changed.
+      let last = '';
       const tick = async () => {
-        if (page.isClosed() || this.page !== page) return;
+        if (gen !== this.streamGen || page.isClosed() || this.page !== page) return;
         try {
-          const buf = await page.screenshot({ type: 'jpeg', quality: 70 });
-          this.emit('frame', { data: buf.toString('base64'), width: this.options!.width, height: this.options!.height });
+          const data = (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64');
+          if (data !== last && gen === this.streamGen) this.emit('frame', { data, width: this.options!.width, height: this.options!.height });
+          last = data;
         } catch {
           /* page navigating */
         }
-        this.pollTimer = setTimeout(tick, 150);
+        if (gen === this.streamGen) this.pollTimer = setTimeout(tick, 150);
       };
       void tick();
       return;
     }
     const cdp = await page.context().newCDPSession(page);
+    if (gen !== this.streamGen) {
+      await cdp.detach().catch(() => {}); // stopped or restarted meanwhile
+      return;
+    }
     this.cdp = cdp;
     cdp.on('Page.screencastFrame', (f: { data: string; sessionId: number; metadata: { deviceWidth: number; deviceHeight: number } }) => {
       this.emit('frame', { data: f.data, width: f.metadata.deviceWidth, height: f.metadata.deviceHeight });
       cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
     });
-    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, everyNthFrame: 1 });
+    const max = this.frameSize;
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, everyNthFrame: 1, maxWidth: max?.width, maxHeight: max?.height }).catch((e) => {
+      if (gen === this.streamGen) throw e;
+    });
   }
 
-  private async stopStream(): Promise<void> {
+  /** Returns the generation a stream started after this stop must still match when it gets going. */
+  private async stopStream(): Promise<number> {
+    const gen = ++this.streamGen;
     clearTimeout(this.pollTimer);
     const cdp = this.cdp;
     this.cdp = undefined;
     if (cdp) await cdp.detach().catch(() => {});
+    return gen;
   }
 
   async stop(): Promise<void> {
@@ -224,15 +273,18 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   async setPickConstraint(c: { selector: string; relation: 'ancestor' | 'descendant' } | null): Promise<{ found: boolean }> {
     const page = this.page;
     if (!page) return { found: false };
-    let handles: ElementHandle[] = [];
     try {
-      if (c) handles = (await page.locator(c.selector).elementHandles()).slice(0, 50);
-      await page.evaluate(([els, relation]) => (window as any).__joule?.setConstraint(els, relation), [handles, c?.relation] as const);
-      return { found: !c || handles.length > 0 };
+      if (!c) {
+        await page.evaluate(() => (window as any).__joule?.setConstraint(null));
+        return { found: true };
+      }
+      const found = await page.locator(c.selector).evaluateAll((els, relation) => {
+        (window as any).__joule?.setConstraint(els.slice(0, 50), relation);
+        return els.length;
+      }, c.relation);
+      return { found: found > 0 };
     } catch {
       return { found: false };
-    } finally {
-      await Promise.all(handles.map((h) => h.dispose().catch(() => {})));
     }
   }
 
@@ -254,7 +306,10 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     await this.refresh();
   }
 
-  /** Resolve every highlight selector to element handles and hand them to the overlay. */
+  /**
+   * Resolve every highlight selector and hand the matches to the overlay: one call per selector that passes its
+   * elements on inside the page (element handles would cost a round trip each, and leak for broad selectors).
+   */
   async refresh(): Promise<void> {
     if (this.refreshing) {
       this.refreshQueued = true;
@@ -263,25 +318,25 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     const page = this.page;
     if (!page || page.isClosed()) return;
     this.refreshing = true;
-    const handles: ElementHandle[] = [];
     try {
-      const resolved = [];
-      for (const item of this.items) {
-        let els: ElementHandle[] = [];
-        try {
-          const loc = page.locator(item.selector);
-          els = item.all ? (await loc.elementHandles()).slice(0, 25) : (await loc.elementHandles()).slice(0, 1);
-        } catch {
-          /* invalid selector */
-        }
-        handles.push(...els);
-        resolved.push({ n: item.n, kind: item.kind, els });
-      }
-      await page.evaluate((items) => (window as any).__joule?.setItems(items), resolved);
+      const items = this.items;
+      await Promise.all(
+        items.map((item, i) =>
+          page
+            .locator(item.selector)
+            .evaluateAll((els, a) => (window as any).__joule?.stageItem(a.i, { n: a.n, kind: a.kind, els: els.slice(0, a.max) }), {
+              i,
+              n: item.n,
+              kind: item.kind,
+              max: item.all ? 25 : 1,
+            })
+            .catch(() => {}), // invalid selector: no outline
+        ),
+      );
+      await page.evaluate((count) => (window as any).__joule?.commitItems(count), items.length);
     } catch {
       /* navigation in progress; the load event will refresh again */
     } finally {
-      await Promise.all(handles.map((h) => h.dispose().catch(() => {})));
       this.refreshing = false;
       if (this.refreshQueued) {
         this.refreshQueued = false;

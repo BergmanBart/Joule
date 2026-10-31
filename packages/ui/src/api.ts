@@ -10,11 +10,14 @@ class Api {
   private listeners = new Map<string, Set<(d: any) => void>>();
   private queue: string[] = [];
   onConnection?: (connected: boolean) => void;
+  /** Binary messages: frames of the browser view (see `Events` in the protocol). */
+  onFrame?: (frame: ArrayBuffer) => void;
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url = (window as any).__JOULE_WS__ ?? `${proto}://${location.host}/ws`;
     const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       this.onConnection?.(true);
@@ -27,6 +30,10 @@ class Api {
       setTimeout(() => this.connect(), 1000);
     };
     ws.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        this.onFrame?.(e.data);
+        return;
+      }
       const msg = JSON.parse(e.data as string);
       if ('event' in msg) {
         for (const l of this.listeners.get(msg.event) ?? []) l(msg.data);

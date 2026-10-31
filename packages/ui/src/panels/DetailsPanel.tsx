@@ -16,6 +16,7 @@ import {
   OPERATORS,
   scopeSelector,
   stepSignature,
+  walk,
   type ActionKind,
   type Assertion,
   type BaseLocator,
@@ -609,6 +610,17 @@ function StepDetails({ step }: { step: Step }) {
           </label>
         </>
       );
+    case 'navigate':
+      return (
+        <>
+          <div className="notice info">Opens this URL in the current page. Combine parameters, for example {'${URL}/orders/${ORDER_ID}'}.</div>
+          <div className="field">
+            <label>URL</label>
+            <ValueField value={step.url} onCommit={(v) => upd((s) => ({ ...s, url: v }) as Step)} placeholder="${URL}" />
+            {!step.url && <div className="field-hint err">A URL is required</div>}
+          </div>
+        </>
+      );
     case 'if':
       return (
         <>
@@ -638,7 +650,7 @@ function StepDetails({ step }: { step: Step }) {
       );
     case 'keywordCall': {
       const kw = project.keywords.find((k) => k.id === step.keywordId);
-      const uses = project.tests.filter((t) => JSON.stringify(t.steps).includes(`"keywordId":"${step.keywordId}"`)).length;
+      const uses = project.tests.filter((t) => [...walk(t.steps)].some(({ step: s }) => s.type === 'keywordCall' && s.keywordId === step.keywordId)).length;
       return (
         <>
           <div className="field">
@@ -700,10 +712,9 @@ export function DetailsPanel() {
   const current = useStore((s) => s.current);
   const detail = useStore((s) => s.detail);
   const selected = useStore((s) => s.selected);
-  const run = useStore((s) => s.run);
+  const state = useStore((s) => (s.detail ? s.run.steps[s.detail] : undefined));
   const step = detail ? findStep(containerSteps(project, current), detail) : undefined;
   if (!project || !step) return null;
-  const state = run.steps[step.id];
   return (
     <>
       <div className="column-header">

@@ -228,6 +228,9 @@ function convertCall(c: ParsedCall, scope: Scope): Step | undefined {
       const m = /^\$\{SCREENSHOT_DIR\}\/(.+)$/.exec(filename);
       if (m) return fromPool(scope, sig, { id: newId('s'), name: '', type: 'screenshot', filename: m[1], fullPage: /^true$/i.test(named(c.args, 'fullPage') ?? '') });
     }
+    if (kw === 'goto' && c.args.length === 1) {
+      return fromPool(scope, sig, { id: newId('s'), name: '', type: 'navigate', url: unarg(named(c.args, 'url') ?? c.args[0]) });
+    }
     if (kw === 'pauseforkey') return fromPool(scope, sig, { id: newId('s'), name: '', type: 'pause', message: c.args[0] ? unarg(c.args[0]) : undefined });
     if (!c.args.length && scope.shared.has(kw)) {
       return fromPool(scope, sig, { id: newId('s'), name: '', type: 'keywordCall', keywordId: scope.shared.get(kw)! });

@@ -57,6 +57,8 @@ export interface RunState {
   paused?: { stepId?: string; message?: string };
   steps: Record<string, StepRunState>;
   output: string[];
+  /** Number of the first line in `output` (older lines are dropped), so each line keeps its React key. */
+  outputStart: number;
   results?: RobotTestResult[];
   logDir?: string;
   ok?: boolean;
@@ -103,7 +105,7 @@ interface State {
   toast?: { text: string; kind: 'info' | 'error' };
 }
 
-const emptyRun: RunState = { running: false, steps: {}, output: [], testIds: [] };
+const emptyRun: RunState = { running: false, steps: {}, output: [], outputStart: 0, testIds: [] };
 
 export const useStore = create<State>(() => ({
   connected: false,
@@ -325,6 +327,14 @@ export function selectContainer(c: Container) {
 /** Open the start URL with newly drawn random values. */
 export function goHome() {
   void api.request('view.navigate', { url: urlOf(newStart()) });
+}
+
+/** Start over in a clean browser (no cookies or storage), the way a real test run begins. */
+export function resetBrowser() {
+  api
+    .request('view.reset', { url: urlOf(newStart()) })
+    .then(() => toast('Browser reset: cookies and storage cleared'))
+    .catch((e: Error) => toast(e.message, 'error'));
 }
 
 export function editTest(id: string, fn: (t: Test) => Test) {
@@ -665,6 +675,22 @@ export function runRobot(opts: { testIds?: string[]; headless?: boolean }) {
   });
 }
 
+const MAX_OUTPUT_LINES = 2000;
+let outputQueue: string[] = [];
+let outputTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Robot output can arrive at hundreds of lines per second: add it to the state in batches. */
+function flushOutput() {
+  clearTimeout(outputTimer);
+  outputTimer = undefined;
+  if (!outputQueue.length) return;
+  const run = get().run;
+  const output = [...run.output, ...outputQueue];
+  outputQueue = [];
+  const dropped = Math.max(0, output.length - MAX_OUTPUT_LINES);
+  set({ run: { ...run, output: dropped ? output.slice(dropped) : output, outputStart: run.outputStart + dropped } });
+}
+
 export function setupEvents() {
   api.onConnection = (connected) => {
     set({ connected });
@@ -675,10 +701,14 @@ export function setupEvents() {
   api.on('view.status', ({ state, message }) => set({ view: { ...get().view, status: state, message } }));
   api.on('run.started', ({ kind, testIds }) => set({ run: { ...get().run, kind, running: true, testIds } }));
   api.on('run.step', (e) => set({ run: { ...get().run, steps: { ...get().run.steps, [e.id]: { status: e.status, message: e.message } } } }));
-  api.on('run.output', ({ line }) => set({ run: { ...get().run, output: [...get().run.output.slice(-2000), line] } }));
+  api.on('run.output', ({ line }) => {
+    outputQueue.push(line);
+    outputTimer ??= setTimeout(flushOutput, 100);
+  });
   api.on('run.paused', (p) => set({ run: { ...get().run, paused: p } }));
   api.on('run.resumed', () => set({ run: { ...get().run, paused: undefined } }));
   api.on('run.done', (d) => {
+    flushOutput();
     set({ run: { ...get().run, running: false, paused: undefined, ok: d.ok, logDir: d.logDir, results: d.results, message: d.message } });
     toast(d.ok ? 'Run passed' : `Run failed${d.message ? `: ${d.message}` : ''}`, d.ok ? 'info' : 'error');
   });

@@ -1,8 +1,8 @@
-import { ArrowLeft, Circle, Crosshair, Globe, Hand, Home, Loader2, Play, RotateCw, X } from 'lucide-react';
+import { ArrowLeft, Circle, Crosshair, Eraser, Globe, Hand, Home, Loader2, Play, RotateCw, X } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { buildSelector, findStep, interpolate, numberSteps, scopeSelector, walk, type HighlightRequest, type Locator, type Step } from '@joule/core';
 import { api } from '../api';
-import { containerSteps, currentParams, effectiveSelection, goHome, startUrl, startView, toast, useStore, type PickTarget } from '../store';
+import { containerSteps, currentParams, effectiveSelection, goHome, resetBrowser, startUrl, startView, toast, useStore, type PickTarget } from '../store';
 
 /** Locator a step points at in the page (element, element-wait or if-condition). */
 export function stepLocator(s: Step): Locator | undefined {
@@ -29,9 +29,14 @@ function useHighlightSync() {
   const running = useStore((s) => s.run.running);
   const status = useStore((s) => s.view.status);
   const params = useParams();
+  // What the overlay shows: most edits (names, values, settings) leave it unchanged, and re-resolving costs the page.
+  const sent = useRef('');
 
   useEffect(() => {
-    if (status !== 'ready') return;
+    if (status !== 'ready') {
+      sent.current = '';
+      return;
+    }
     const steps = containerSteps(project, current);
     const numbers = numberSteps(steps);
     const sel = effectiveSelection(steps, selected);
@@ -43,7 +48,12 @@ function useHighlightSync() {
       const kind: HighlightRequest['kind'] = step.id === runningId ? 'running' : sel.size ? (sel.has(step.id) ? 'selected' : 'dim') : 'normal';
       items.push({ n: numbers.get(step.id) ?? 0, selector: interpolate(buildSelector(loc), params), kind, all: step.id === detail });
     }
-    const t = setTimeout(() => void api.request('view.highlights', { items }).catch(() => {}), 120);
+    const key = JSON.stringify(items);
+    if (key === sent.current) return;
+    const t = setTimeout(() => {
+      sent.current = key;
+      void api.request('view.highlights', { items }).catch(() => (sent.current = ''));
+    }, 120);
     return () => clearTimeout(t);
   }, [project, current, selected, detail, runSteps, running, status, params]);
 }
@@ -82,48 +92,86 @@ function pickBanner(t: NonNullable<PickTarget>): string {
 
 const BUTTONS = ['left', 'middle', 'right'] as const;
 
+/** Ask for the next frame no sooner than this after drawing one: about 30 frames per second, half the work of 60. */
+const FRAME_GAP_MS = 20;
+
 export function BrowserPanel() {
   const view = useStore((s) => s.view);
   const project = useStore((s) => s.project);
   const pickTarget = useStore((s) => s.pickTarget);
   const run = useStore((s) => s.run);
+  const connected = useStore((s) => s.connected);
   const canvas = useRef<HTMLCanvasElement>(null);
   const lastMove = useRef(0);
   useHighlightSync();
   usePickConstraint();
 
   useEffect(() => {
-    const img = new Image();
-    let pending: { data: string; width: number; height: number } | null = null;
+    let pending: ArrayBuffer | null = null;
     let busy = false;
-    const drawNext = () => {
+    // Decode off the main thread, draw at the next animation frame (there is none while the app is hidden), then ask
+    // the server for the next frame; it skips the ones we could not keep up with.
+    const drawNext = async () => {
       if (!pending || busy) return;
-      const f = pending;
+      const frame = pending;
       pending = null;
       busy = true;
-      img.onload = () => {
+      const size = new DataView(frame);
+      const width = size.getUint16(0);
+      const height = size.getUint16(2);
+      const bitmap = await createImageBitmap(new Blob([new Uint8Array(frame, 4)], { type: 'image/jpeg' })).catch(() => null);
+      if (bitmap) {
+        await new Promise((r) => requestAnimationFrame(r));
         const c = canvas.current;
         if (c) {
-          if (c.width !== f.width || c.height !== f.height) {
-            c.width = f.width;
-            c.height = f.height;
+          if (c.width !== width || c.height !== height) {
+            c.width = width;
+            c.height = height;
           }
-          c.getContext('2d')!.drawImage(img, 0, 0, f.width, f.height);
+          // the frame may be smaller than the page (scaled to the view); the canvas keeps the page size for clicks
+          c.getContext('2d')!.drawImage(bitmap, 0, 0, width, height);
         }
-        busy = false;
-        drawNext();
-      };
-      img.onerror = () => {
-        busy = false;
-        drawNext();
-      };
-      img.src = `data:image/jpeg;base64,${f.data}`;
+        bitmap.close();
+        await new Promise((r) => setTimeout(r, FRAME_GAP_MS));
+      }
+      busy = false;
+      api.send('view.frameDrawn', {});
+      void drawNext();
     };
-    return api.on('view.frame', (f) => {
-      pending = f; // drop frames we can't draw in time
-      drawNext();
-    });
+    api.onFrame = (frame) => {
+      pending = frame;
+      void drawNext();
+    };
+    return () => {
+      api.onFrame = undefined;
+    };
   }, []);
+
+  // Tell the server how the view is shown: nothing needs streaming while the app is minimized or another tab is in
+  // front, and frames larger than the canvas is shown at are wasted. Again after a reconnect (a new server session).
+  useEffect(() => {
+    const c = canvas.current;
+    if (!connected || !c) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const report = () => {
+      const r = c.getBoundingClientRect();
+      const width = Math.min(c.width, Math.ceil(r.width * devicePixelRatio));
+      const height = Math.min(c.height, Math.ceil(r.height * devicePixelRatio));
+      api.send('view.display', { visible: !document.hidden && width > 0 && height > 0, width, height });
+    };
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(report, 250);
+    });
+    observer.observe(c);
+    document.addEventListener('visibilitychange', report);
+    report(); // also tells the server that a remounted view is ready for frames
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', report);
+    };
+  }, [connected]);
 
   const toPage = (e: React.MouseEvent | React.WheelEvent) => {
     const c = canvas.current!;
@@ -150,6 +198,14 @@ export function BrowserPanel() {
         </button>
         <button className="icon-btn" title="Go to the start URL (${URL}); random parameters get new values" onClick={goHome}>
           <Home size={15} />
+        </button>
+        <button
+          className="icon-btn"
+          title="Reset the browser: clear cookies and storage, then go to the start URL (like a real test run)"
+          disabled={run.kind === 'live' && run.running}
+          onClick={resetBrowser}
+        >
+          <Eraser size={15} />
         </button>
         <div className="urlbar" title={view.url}>
           <Globe size={13} />

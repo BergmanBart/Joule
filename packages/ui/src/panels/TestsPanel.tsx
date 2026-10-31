@@ -143,7 +143,10 @@ function CustomKeywordTree({ keywords }: { keywords: CustomKeyword[] }) {
 export function TestsPanel() {
   const project = useStore((s) => s.project);
   const current = useStore((s) => s.current);
-  const run = useStore((s) => s.run);
+  const runKind = useStore((s) => s.run.kind);
+  const running = useStore((s) => s.run.running);
+  const runTestIds = useStore((s) => s.run.testIds);
+  const results = useStore((s) => s.run.results);
   const customKeywords = useStore((s) => s.customKeywords);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -154,16 +157,16 @@ export function TestsPanel() {
   };
 
   const resultFor = (id: string) => {
-    if (run.kind !== 'robot') return undefined;
-    if (run.running && run.testIds.includes(id)) return 'running';
-    return run.results?.find((r) => r.testId === id)?.status;
+    if (runKind !== 'robot') return undefined;
+    if (running && runTestIds.includes(id)) return 'running';
+    return results?.find((r) => r.testId === id)?.status;
   };
 
   return (
     <>
       <div className="column-header">
         <span className="title">Tests</span>
-        <button className="icon-btn" title="Run all tests with Robot Framework (uses the run plan)" disabled={run.running} onClick={() => runRobot({ headless: project.settings.headlessRunAll })}>
+        <button className="icon-btn" title="Run all tests with Robot Framework (uses the run plan)" disabled={running} onClick={() => runRobot({ headless: project.settings.headlessRunAll })}>
           <PlayCircle size={16} />
         </button>
         <button className="icon-btn" title="New test" onClick={addTest}>
@@ -198,7 +201,7 @@ export function TestsPanel() {
               {t.kind === 'smoke' && <span className="tag smoke">smoke</span>}
               {t.flow === 'unhappy' && <span className="tag unhappy">unhappy</span>}
               <span className="actions" onClick={(e) => e.stopPropagation()}>
-                <button className="icon-btn small" title="Run with Robot Framework" disabled={run.running} onClick={() => runRobot({ testIds: [t.id] })}>
+                <button className="icon-btn small" title="Run with Robot Framework" disabled={running} onClick={() => runRobot({ testIds: [t.id] })}>
                   <Play size={13} />
                 </button>
                 <Menu

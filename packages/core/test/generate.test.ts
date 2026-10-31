@@ -81,6 +81,7 @@ function sampleProject(): Project {
       else: [{ id: 'p1', name: '', type: 'pause' }],
     },
     { id: 'sh1', name: '', type: 'screenshot', filename: 'after-login', fullPage: true },
+    { id: 'n1', name: '', type: 'navigate', url: '${URL}/users/${USERNAME}' },
     {
       id: 'a1',
       name: '',
@@ -294,7 +295,7 @@ describe('parameters', () => {
 describe('step tree', () => {
   it('numbers every non-group step', () => {
     const n = numberSteps(sampleProject().tests[0].steps);
-    expect([...n.keys()]).toEqual(['c1', 's1', 's2', 'if1', 'if2', 'w1', 'p1', 'sh1', 'a1']);
+    expect([...n.keys()]).toEqual(['c1', 's1', 's2', 'if1', 'if2', 'w1', 'p1', 'sh1', 'n1', 'a1']);
   });
   it('picks selected steps; selected group keeps children', () => {
     const steps = sampleProject().tests[0].steps;
@@ -306,11 +307,11 @@ describe('step tree', () => {
   it('moves steps into a group and refuses moving into itself', () => {
     const steps = sampleProject().tests[0].steps;
     const moved = moveSteps(steps, ['sh1'], 'g1', 0);
-    expect(moved.map((s) => s.id)).toEqual(['c1', 'g1', 'if1', 'a1']);
+    expect(moved.map((s) => s.id)).toEqual(['c1', 'g1', 'if1', 'n1', 'a1']);
     expect((moved[1] as Extract<Step, { type: 'group' }>).steps.map((s) => s.id)).toEqual(['sh1', 's1', 's2']);
     expect(moveSteps(steps, ['if1'], 'if2:then', 0)).toBe(steps);
     const down = moveSteps(steps, ['c1'], 'root', 3);
-    expect(down.map((s) => s.id)).toEqual(['g1', 'if1', 'c1', 'sh1', 'a1']);
+    expect(down.map((s) => s.id)).toEqual(['g1', 'if1', 'c1', 'sh1', 'n1', 'a1']);
   });
 });
 
@@ -358,6 +359,7 @@ describe('robot generation', () => {
               Pause For Key
           END
           Take Screenshot    filename=\${SCREENSHOT_DIR}/after-login    fullPage=True
+          Go To    \${URL}/users/\${USERNAME}
           Get Attribute    css=button.primary    type    contains    \${EXPECTED_TYPE}
 
       *** Keywords ***

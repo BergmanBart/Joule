@@ -150,6 +150,10 @@ export const ScreenshotStep = z.object({
 });
 export type ScreenshotStep = z.infer<typeof ScreenshotStep>;
 
+/** Open a URL in the current page; may contain ${param}. */
+export const NavigateStep = z.object({ ...base, type: z.literal('navigate'), url: z.string().default('${URL}') });
+export type NavigateStep = z.infer<typeof NavigateStep>;
+
 export const KeywordCallStep = z.object({ ...base, type: z.literal('keywordCall'), keywordId: z.string() });
 export type KeywordCallStep = z.infer<typeof KeywordCallStep>;
 
@@ -174,11 +178,11 @@ export type Condition = z.infer<typeof Condition>;
 export type GroupStep = { id: string; name: string; type: 'group'; collapsed: boolean; steps: Step[] };
 export type IfStep = { id: string; name: string; type: 'if'; condition: Condition; then: Step[]; else: Step[] };
 
-export type Step = ElementStep | WaitStep | PauseStep | ScreenshotStep | KeywordCallStep | CustomCallStep | RawStep | GroupStep | IfStep;
+export type Step = ElementStep | WaitStep | PauseStep | ScreenshotStep | NavigateStep | KeywordCallStep | CustomCallStep | RawStep | GroupStep | IfStep;
 export type StepType = Step['type'];
 
 export const Step: z.ZodType<Step, z.ZodTypeDef, unknown> = z.lazy(() =>
-  z.union([ElementStep, WaitStep, PauseStep, ScreenshotStep, KeywordCallStep, CustomCallStep, RawStep, GroupStep, IfStep]),
+  z.union([ElementStep, WaitStep, PauseStep, ScreenshotStep, NavigateStep, KeywordCallStep, CustomCallStep, RawStep, GroupStep, IfStep]),
 );
 
 export const GroupStep: z.ZodType<GroupStep, z.ZodTypeDef, unknown> = z.object({

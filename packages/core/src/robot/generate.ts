@@ -17,7 +17,7 @@ const RESERVED = new Set(
   [
     'Click', 'Click With Options', 'Fill Text', 'Hover', 'Select Options By', 'Check Checkbox', 'Uncheck Checkbox',
     'Press Keys', 'Get Text', 'Get Property', 'Get Attribute', 'Get Element Count', 'Get Element States', 'Sleep',
-    'Wait For Load State', 'Wait For Elements State', 'Take Screenshot', 'Pause For Key', 'New Page', 'New Browser',
+    'Wait For Load State', 'Wait For Elements State', 'Take Screenshot', 'Go To', 'Pause For Key', 'New Page', 'New Browser',
     'New Context', 'Close Browser', 'Open Joule Browser', 'Run Keyword And Return Status', 'Set Browser Timeout', 'Log',
     'Random From Regex', 'Relative Date', 'Set Suite Variable', SUITE_SETUP,
   ].map(normalize),
@@ -123,6 +123,8 @@ function stepLines(step: Step, ctx: Ctx, depth: number): string[] {
       if (step.fullPage) cells.push('fullPage=True');
       return [line(...cells)];
     }
+    case 'navigate':
+      return [line('Go To', arg(step.url))];
     case 'keywordCall':
       return [line(ctx.keywordNames.get(step.keywordId) ?? `Fail    Missing keyword ${step.keywordId}`)];
     case 'customCall':

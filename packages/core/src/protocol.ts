@@ -55,6 +55,8 @@ export interface Requests {
   'view.navigate': [{ url: string }, {}];
   'view.reload': [{}, {}];
   'view.back': [{}, {}];
+  /** Fresh browser context (no cookies or storage), then open `url`. */
+  'view.reset': [{ url: string }, {}];
   'view.mode': [{ mode: 'record' | 'interact' }, {}];
   'view.mouse': [{ type: 'move' | 'down' | 'up' | 'wheel'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clickCount?: number; deltaX?: number; deltaY?: number }, {}];
   'view.key': [{ type: 'down' | 'up' | 'text'; key?: string; text?: string }, {}];
@@ -62,6 +64,13 @@ export interface Requests {
   'view.count': [{ selector: string }, { count: number; error?: string }];
   'view.pickConstraint': [{ constraint: { selector: string; relation: 'ancestor' | 'descendant' } | null }, { found: boolean }];
   'view.describeParent': [{ selector: string }, { descriptor?: ElementDescriptor }];
+  /** The client drew the last frame it was sent and can take the next one. */
+  'view.frameDrawn': [{}, {}];
+  /**
+   * How the client shows the browser view: not at all (minimized, another tab in front) or at what size in device
+   * pixels. The browser streams while some client shows the view, scaled down to the largest size one shows it at.
+   */
+  'view.display': [{ visible: boolean; width: number; height: number }, {}];
   /** `params`: resolved parameter values to use (the ones the browser view shows); resolved fresh when missing. */
   'run.live': [{ project: Project; testId: string; stepIds?: string[]; fromStart: boolean; params?: Record<string, string> }, {}];
   'run.robot': [{ project: Project; testIds?: string[]; headless?: boolean; parallel?: boolean }, {}];
@@ -73,8 +82,11 @@ export interface Requests {
 
 export type RequestType = keyof Requests;
 
+/**
+ * Server → client JSON events. Frames of the browser view are binary messages instead: the page width and height
+ * (uint16, big-endian) followed by the JPEG. After drawing one the client sends `view.frameDrawn` for the next.
+ */
 export interface Events {
-  'view.frame': { data: string; width: number; height: number };
   'view.pick': { descriptor: ElementDescriptor };
   'view.url': { url: string };
   'view.status': { state: 'starting' | 'ready' | 'closed' | 'error'; message?: string };

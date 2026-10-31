@@ -83,6 +83,8 @@ function loginSteps(): Step[] {
       assertion: { property: 'text', operator: '==', expected: 'Apple' },
     },
     { id: 'shot', name: '', type: 'screenshot', filename: 'dashboard', fullPage: false },
+    { id: 'nav', name: '', type: 'navigate', url: '${URL}shadow.html?user=${USERNAME}' },
+    { id: 'basket', name: '', type: 'element', mode: 'assert', locator: { props: d('h1', {}, { id: 'title' }), use: ['id'] }, assertion: { property: 'text', operator: '==', expected: 'Basket' } },
   ];
 }
 
@@ -129,6 +131,39 @@ describe('browser session', () => {
     expect(await session.count('css=:text-is("Log in")')).toBe(1);
     expect(await session.count('css=[[bad')).toMatchObject({ error: expect.any(String) });
     await session.setHighlights([{ n: 1, selector: 'css=input', kind: 'selected', all: true }]);
+  });
+
+  it('streams no frames while the page and its outlines are still', async () => {
+    let frames = 0;
+    const count = () => frames++;
+    session.on('frame', count);
+    await session.setHighlights([
+      { n: 1, selector: 'css=input', kind: 'selected', all: true },
+      { n: 2, selector: 'css=button', kind: 'normal' },
+      { n: 3, selector: 'css=[[bad', kind: 'normal' },
+    ]);
+    await expect.poll(() => frames, { timeout: 3000 }).toBeGreaterThan(0); // the new outline is drawn
+    await session.page!.waitForTimeout(500);
+    frames = 0;
+    // outlines that kept following the page used to repaint it, and so stream a frame, every animation frame
+    await session.page!.waitForTimeout(1000);
+    session.off('frame', count);
+    expect(frames).toBeLessThan(3);
+  });
+
+  it('pauses the frame stream and resumes with the current page', async () => {
+    await session.setStreaming(false);
+    let frames = 0;
+    const count = () => frames++;
+    session.on('frame', count);
+    await session.page!.evaluate(() => (document.body.style.background = 'rgb(200, 0, 0)'));
+    await session.page!.waitForTimeout(500);
+    expect(frames).toBe(0);
+    const frame = new Promise((r) => session.once('frame', r));
+    await session.setStreaming(true);
+    await frame;
+    session.off('frame', count);
+    await session.page!.evaluate(() => (document.body.style.background = ''));
   });
 
   it('resolves must-be-inside selectors and limits scope picks', async () => {
@@ -203,6 +238,21 @@ describe('browser session', () => {
   });
 });
 
+describe('reset', () => {
+  it('starts over without cookies or storage', async () => {
+    await session.navigate(URL);
+    await session.page!.evaluate(() => {
+      document.cookie = 'token=abc';
+      localStorage.setItem('k', 'v');
+    });
+    await session.reset(URL);
+    expect(session.page!.url()).toBe(URL);
+    expect(await session.page!.evaluate(() => [document.cookie, localStorage.getItem('k')])).toEqual(['', null]);
+    // the overlay is injected into the new context too
+    expect(await session.page!.evaluate(() => typeof (window as any).__joule)).toBe('object');
+  });
+});
+
 describe('live runner', () => {
   it('runs login → dashboard with params, if and assertions', async () => {
     await session.navigate(URL);
@@ -212,7 +262,7 @@ describe('live runner', () => {
       page: session.page!,
       steps: loginSteps(),
       keywords: [],
-      params: { USERNAME: 'alice' },
+      params: { URL, USERNAME: 'alice' },
       timeoutSeconds: 5,
       projectDir: dir,
       screenshotDir: 'screenshots',
@@ -223,7 +273,8 @@ describe('live runner', () => {
     const failed = events.filter((e) => e.status === 'fail');
     expect(failed).toEqual([]);
     expect(ok).toBe(true);
-    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['u', 'p', 'c', 'w', 'a', 'sel', 'if', 'a2', 'del', 'left', 'shot']);
+    expect(events.filter((e) => e.status === 'pass').map((e) => e.id)).toEqual(['u', 'p', 'c', 'w', 'a', 'sel', 'if', 'a2', 'del', 'left', 'shot', 'nav', 'basket']);
+    expect(session.page!.url()).toBe(`${URL}shadow.html?user=alice`);
   }, 30_000);
 
   it('reports the failing step and stops', async () => {

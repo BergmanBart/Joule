@@ -19,7 +19,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ENVIRONMENTS, type Environment } from '@joule/core';
 import { api } from './api';
 import { Menu, MenuItem, Resizer } from './components/ui';
@@ -58,7 +58,8 @@ function TopBar() {
   const projectDir = useStore((s) => s.projectDir);
   const dirty = useStore((s) => s.dirty);
   const saving = useStore((s) => s.saving);
-  const run = useStore((s) => s.run);
+  const running = useStore((s) => s.run.running);
+  const robotRunning = useStore((s) => s.run.running && s.run.kind === 'robot');
   const recent = useStore((s) => s.settings.recent);
   const open = (modal: ReturnType<typeof useStore.getState>['modal']) => useStore.setState({ modal });
   return (
@@ -139,12 +140,12 @@ function TopBar() {
           <button className="icon-btn" title="Project settings" onClick={() => open({ kind: 'settings' })}>
             <SlidersHorizontal size={16} />
           </button>
-          {run.running && run.kind === 'robot' ? (
+          {robotRunning ? (
             <button className="btn small danger" onClick={() => api.request('run.stop', {})}>
               <Square size={12} /> Stop
             </button>
           ) : (
-            <button className="btn small primary" disabled={run.running} onClick={() => runRobot({ headless: project.settings.headlessRunAll })} title="Run all tests with Robot Framework following the run plan">
+            <button className="btn small primary" disabled={running} onClick={() => runRobot({ headless: project.settings.headlessRunAll })} title="Run all tests with Robot Framework following the run plan">
               <PlayCircle size={14} /> Run all
             </button>
           )}
@@ -153,6 +154,11 @@ function TopBar() {
     </div>
   );
 }
+
+/** One line of Robot output; memoized, so a batch of new lines doesn't re-render the old ones. */
+const OutputLine = memo(function OutputLine({ line }: { line: string }) {
+  return <div className={/\|\s*PASS\s*\|/.test(line) ? 'PASS' : /\|\s*FAIL\s*\|/.test(line) ? 'FAIL' : ''}>{line}</div>;
+});
 
 function OutputDrawer() {
   const run = useStore((s) => s.run);
@@ -188,12 +194,7 @@ function OutputDrawer() {
       </div>
       <div className="console" ref={ref}>
         {run.kind !== 'robot' && <span className="muted">Run a test with Robot Framework to see its output here.</span>}
-        {run.kind === 'robot' &&
-          run.output.map((l, i) => (
-            <div key={i} className={/\|\s*PASS\s*\|/.test(l) ? 'PASS' : /\|\s*FAIL\s*\|/.test(l) ? 'FAIL' : ''}>
-              {l}
-            </div>
-          ))}
+        {run.kind === 'robot' && run.output.map((l, i) => <OutputLine key={run.outputStart + i} line={l} />)}
       </div>
     </div>
   );
@@ -201,11 +202,12 @@ function OutputDrawer() {
 
 function StatusBar() {
   const connected = useStore((s) => s.connected);
-  const run = useStore((s) => s.run);
+  // only in-app runs are shown here, so the lines of a Robot run don't re-render the status bar
+  const run = useStore((s) => (s.run.kind === 'live' ? s.run : undefined));
   const view = useStore((s) => s.view);
   const project = useStore((s) => s.project);
   const outputOpen = useStore((s) => s.outputOpen);
-  const steps = Object.values(run.steps);
+  const steps = run ? Object.values(run.steps) : [];
   return (
     <div className="statusbar">
       <span className="item">{connected ? <Wifi size={12} color="var(--ok)" /> : <WifiOff size={12} color="var(--danger)" />}{connected ? 'Connected' : 'Reconnecting…'}</span>
@@ -215,7 +217,7 @@ function StatusBar() {
         </span>
       )}
       {view.mode === 'record' && <span className="item" style={{ color: '#ff7b7b' }}>● Recording</span>}
-      {run.kind === 'live' && (
+      {run && (
         <span className="item">
           {run.running ? <Loader2 size={12} className="spin" /> : run.ok ? <Check size={12} color="var(--ok)" /> : <AlertTriangle size={12} color="var(--danger)" />}
           In-app run: {steps.filter((s) => s.status === 'pass').length} passed, {steps.filter((s) => s.status === 'fail').length} failed
@@ -281,7 +283,7 @@ function Modals() {
 }
 
 export function App() {
-  const project = useStore((s) => s.project);
+  const hasProject = useStore((s) => !!s.project);
   const detail = useStore((s) => s.detail);
   const toastMsg = useStore((s) => s.toast);
   const warnings = useStore((s) => s.warnings);
@@ -333,7 +335,7 @@ export function App() {
           </button>
         </div>
       )}
-      {project ? (
+      {hasProject ? (
         <div className="columns">
           <div className="column side" style={{ width: testsW, flexShrink: 0 }}>
             <TestsPanel />

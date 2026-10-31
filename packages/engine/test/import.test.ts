@@ -47,6 +47,7 @@ function project(): Project {
       else: [{ id: 'w2', name: '', type: 'wait', wait: { kind: 'load', state: 'networkidle' } }],
     },
     { id: 'sh', name: '', type: 'screenshot', filename: 'end', fullPage: true },
+    { id: 'nav', name: '', type: 'navigate', url: '${URL}?user=${USER}' },
     { id: 'a1', name: '', type: 'element', mode: 'assert', locator: { props: btn, use: ['tag'] }, assertion: { property: 'state', operator: '!=', expected: 'disabled' } },
   ];
   return Project.parse(p);
@@ -183,7 +184,7 @@ describe.runIf(python)('robot import', () => {
     expect(await externallyEdited(dir, saved)).toEqual(['tests/Test1.robot']);
     const { project: back } = await importFolder(dir, python!, saved);
     const ids = back.tests[0].steps.map((s) => s.id);
-    expect(ids.filter((id) => saved.tests[0].steps.some((s) => s.id === id))).toEqual(['c1', 'g1', 'if1', 'sh', 'a1']);
+    expect(ids.filter((id) => saved.tests[0].steps.some((s) => s.id === id))).toEqual(['c1', 'g1', 'if1', 'sh', 'nav', 'a1']);
     const raw = back.tests[0].steps.find((s): s is Extract<Step, { type: 'raw' }> => s.type === 'raw');
     expect(raw?.lines).toEqual(['Log    hand written']);
   });

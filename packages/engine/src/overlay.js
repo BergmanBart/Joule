@@ -8,7 +8,12 @@
   let host = null;
   let root = null;
   let pool = [];
+  // What each pooled box shows, so a draw only touches the DOM when an outline moved or changed.
+  let shown = [];
   let frame = 0;
+  let poll = 0;
+  // Until then outlines follow the page every animation frame (scrolling, resizing, animations).
+  let activeUntil = 0;
 
   const COLORS = { normal: '#ff4d4f', selected: '#ff4d4f', dim: '#ff4d4f', extra: '#faad14', running: '#36cfc9', hover: '#4096ff', anchor: '#b37feb' };
 
@@ -19,6 +24,7 @@
     host.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
     root = host.attachShadow({ mode: 'closed' });
     pool = [];
+    shown = [];
     document.documentElement.appendChild(host);
   }
 
@@ -52,7 +58,12 @@
       if (!b.el || !b.el.isConnected) continue;
       const r = b.el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;
-      const d = box(used++);
+      const i = used++;
+      const d = box(i);
+      // Rewriting the same styles still repaints the page, and every repaint is streamed to the app as a frame.
+      const key = `${r.left},${r.top},${r.width},${r.height},${b.kind},${b.n}`;
+      if (shown[i] === key) continue;
+      shown[i] = key;
       const color = COLORS[b.kind];
       const width = b.kind === 'selected' ? 3 : 2;
       d.style.display = 'block';
@@ -68,13 +79,37 @@
       badge.style.background = color;
       badge.textContent = b.n == null ? '' : String(b.n);
     }
-    for (let i = used; i < pool.length; i++) pool[i].style.display = 'none';
-    if (boxes.length) schedule(); // keep following scroll/animations
+    for (let i = used; i < pool.length; i++) {
+      if (shown[i] === '') continue;
+      shown[i] = '';
+      pool[i].style.display = 'none';
+    }
+    if (!boxes.length) return;
+    // keep following the page: every frame while it scrolls or animates, otherwise a few times per second
+    if (performance.now() < activeUntil) schedule();
+    else if (!poll) {
+      poll = setTimeout(() => {
+        poll = 0;
+        schedule();
+      }, 250);
+    }
   }
 
   function schedule() {
     if (!frame) frame = requestAnimationFrame(draw);
   }
+
+  function wake() {
+    activeUntil = performance.now() + 1000;
+    schedule();
+  }
+  window.addEventListener('scroll', wake, true); // capture: also scrolling inside elements
+  window.addEventListener('resize', wake);
+  window.addEventListener('animationstart', wake, true);
+  window.addEventListener('transitionrun', wake, true);
+  // hover styles and late images can move elements too
+  window.addEventListener('mouseover', schedule, true);
+  window.addEventListener('load', schedule, true);
 
   // ---------- shadow DOM ----------
   // Playwright's css engine pierces open shadow roots (also with `>` from a host to its shadow children) and
@@ -240,10 +275,18 @@
   // ---------- page changes → ask node to re-resolve outlines ----------
 
   let changeTimer = 0;
+  let changingSince = 0;
   function onMutations(records) {
     if (records.every((r) => host && (r.target === host || host.contains(r.target)))) return;
+    schedule();
+    // 400 ms after the page settles, and at least every 2 s while it keeps changing (a ticking clock)
+    const now = performance.now();
+    if (!changeTimer) changingSince = now;
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => window.__jouleChanged && window.__jouleChanged(), 400);
+    changeTimer = setTimeout(() => {
+      changeTimer = 0;
+      if (window.__jouleChanged) window.__jouleChanged();
+    }, Math.max(0, Math.min(400, changingSince + 2000 - now)));
   }
   const OBSERVE = { subtree: true, childList: true, attributes: true, characterData: true };
   const observer = new MutationObserver(onMutations);
@@ -260,14 +303,20 @@
   if (document.documentElement) observe();
   else document.addEventListener('DOMContentLoaded', observe);
 
+  let staged = [];
   window.__joule = {
     setMode(mode) {
       state.mode = mode;
       if (mode !== 'record') state.hover = null;
       schedule();
     },
-    setItems(items) {
-      state.items = items;
+    /** Matches of highlight item `i`, sent per selector; `commitItems` then shows all of them at once. */
+    stageItem(i, item) {
+      staged[i] = item;
+    },
+    commitItems(count) {
+      state.items = staged.slice(0, count).filter(Boolean);
+      staged = [];
       schedule();
     },
     setConstraint(els, relation) {

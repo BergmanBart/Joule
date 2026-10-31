@@ -11,6 +11,7 @@ import {
   Copy,
   FolderPlus,
   GitBranch,
+  Globe,
   Loader2,
   MinusCircle,
   MousePointerClick,
@@ -86,7 +87,11 @@ export function StepsPanel() {
   const current = useStore((s) => s.current);
   const selected = useStore((s) => s.selected);
   const detail = useStore((s) => s.detail);
-  const run = useStore((s) => s.run);
+  // not the whole run: Robot output lines would re-render every row
+  const runSteps = useStore((s) => s.run.steps);
+  const runKind = useStore((s) => s.run.kind);
+  const running = useStore((s) => s.run.running);
+  const paused = useStore((s) => !!s.run.paused);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const customKeywords = useStore((s) => s.customKeywords);
@@ -155,7 +160,7 @@ export function StepsPanel() {
     }
   }
 
-  const live = run.kind === 'live' && run.running;
+  const live = runKind === 'live' && running;
   const hasSelection = selected.length > 0;
   const dimOthers = hasSelection;
 
@@ -192,7 +197,7 @@ export function StepsPanel() {
       return;
     }
     const s = row.step;
-    const state = run.steps[s.id];
+    const state = runSteps[s.id];
     const num = numbers.get(s.id);
     rendered.push(
       <div
@@ -250,7 +255,7 @@ export function StepsPanel() {
           {current.kind === 'keyword' ? 'Keyword · ' : ''}
           {container.name}
         </span>
-        {run.paused && run.kind === 'live' && (
+        {paused && runKind === 'live' && (
           <button className="btn small primary" onClick={() => api.request('run.continue', {})} title="Continue after pause">
             <Play size={12} /> Continue
           </button>
@@ -261,10 +266,10 @@ export function StepsPanel() {
           </button>
         ) : (
           <>
-            <button className="icon-btn" title={hasSelection ? 'Run selected steps in the browser view' : 'Select steps to run only those'} disabled={!hasSelection || run.running} onClick={() => runLive({ stepIds: selected, fromStart: false })}>
+            <button className="icon-btn" title={hasSelection ? 'Run selected steps in the browser view' : 'Select steps to run only those'} disabled={!hasSelection || running} onClick={() => runLive({ stepIds: selected, fromStart: false })}>
               <Play size={15} />
             </button>
-            <button className="icon-btn" title="Run all steps in the browser view (from the start URL)" disabled={run.running || !steps.length} onClick={() => runLive({ fromStart: true })}>
+            <button className="icon-btn" title="Run all steps in the browser view (from the start URL)" disabled={running || !steps.length} onClick={() => runLive({ fromStart: true })}>
               <PlayCircle size={16} />
             </button>
           </>
@@ -289,6 +294,9 @@ export function StepsPanel() {
               </MenuItem>
               <MenuItem icon={<Camera size={14} color="#f472b6" />} onClick={() => (close(), addStepOfType('screenshot'))}>
                 Screenshot
+              </MenuItem>
+              <MenuItem icon={<Globe size={14} color="#34d399" />} onClick={() => (close(), addStepOfType('navigate'))}>
+                Go to URL
               </MenuItem>
               <MenuItem icon={<GitBranch size={14} color="#facc15" />} onClick={() => (close(), addStepOfType('if'))}>
                 If statement

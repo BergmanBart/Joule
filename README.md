@@ -50,7 +50,7 @@ everything into a `.venv` in the project folder. Python is looked up in this ord
   **Interact** mode lets you use the page normally (log in, navigate) without recording.
 - **Details** (right column): Action or Assertion, the search properties used to find the element (with a live
   “finds 0 / 1 / n elements” check and dashed outlines for extra matches), action/assert settings, `${PARAM}` values.
-- **Add** menu: wait (time, page load, element), pause, screenshot, if statement (nested), group, Robot code,
+- **Add** menu: wait (time, page load, element), pause, screenshot, go to URL, if statement (nested), group, Robot code,
   reusable keywords.
 - **Groups**: select steps (Ctrl/Shift-click) → Ctrl+G. Copy/paste them between tests (Ctrl+C / Ctrl+V).
   *Make reusable* turns a group into a linked keyword shared by all tests (edit it once, it changes everywhere).

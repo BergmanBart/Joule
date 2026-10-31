@@ -220,6 +220,9 @@ export class LiveRunner {
         await page.screenshot({ path, fullPage: step.fullPage });
         return;
       }
+      case 'navigate':
+        await page.goto(this.v(step.url), t);
+        return;
       case 'keywordCall': {
         const kw = this.keywordsById.get(step.keywordId);
         if (!kw) throw new StepFailure('Keyword no longer exists');

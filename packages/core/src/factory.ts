@@ -53,7 +53,7 @@ export function isCheckable(d: ElementDescriptor): boolean {
   return d.tag === 'input' && (type === 'checkbox' || type === 'radio');
 }
 
-export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'group' | 'if' | 'keywordCall', extra: { keywordId?: string } = {}): Step {
+export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'navigate' | 'group' | 'if' | 'keywordCall', extra: { keywordId?: string } = {}): Step {
   const id = newId('s');
   switch (type) {
     case 'wait':
@@ -62,6 +62,8 @@ export function newStep(type: 'wait' | 'pause' | 'screenshot' | 'group' | 'if' |
       return { id, name: '', type };
     case 'screenshot':
       return { id, name: '', type, filename: 'screenshot', fullPage: false };
+    case 'navigate':
+      return { id, name: '', type, url: '${URL}' };
     case 'group':
       return { id, name: 'Group', type, collapsed: false, steps: [] };
     case 'if':
@@ -136,6 +138,8 @@ export function describeStep(step: Step, keywords: Keyword[] = []): string {
       return 'Pause';
     case 'screenshot':
       return `Screenshot ${step.filename}`;
+    case 'navigate':
+      return `Go to ${step.url}`;
     case 'group':
       return 'Group';
     case 'if': {

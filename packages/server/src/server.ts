@@ -36,7 +36,19 @@ import {
 /** $JOULE_HOME lets the portable desktop app keep its settings next to the exe. */
 const settingsFile = () => join(process.env.JOULE_HOME || join(homedir(), '.joule'), 'settings.json');
 
-type Handler<K extends RequestType> = (payload: Requests[K][0]) => Promise<Requests[K][1]>;
+type Handler<K extends RequestType> = (payload: Requests[K][0], client: WebSocket) => Promise<Requests[K][1]>;
+
+/** A connected UI and its share of the browser view frames. */
+interface Client {
+  /** Shows the browser view (its window is not hidden or minimized). */
+  visible: boolean;
+  /** Size it shows the view at, in device pixels; unknown until it says. */
+  size?: { width: number; height: number };
+  /** Was sent a frame that it has not drawn yet. */
+  busy: boolean;
+  /** Number of the last frame it was sent. */
+  seen: number;
+}
 
 export interface ServerOptions {
   port: number;
@@ -85,7 +97,7 @@ export async function startServer(opts: ServerOptions) {
   let settings = await readSettings();
   let projectDir: string | undefined;
   let project: Project | undefined;
-  const clients = new Set<WebSocket>();
+  const clients = new Map<WebSocket, Client>();
   const session = new BrowserSession();
   let liveAbort: AbortController | undefined;
   let pauseResolve: (() => void) | undefined;
@@ -93,10 +105,41 @@ export async function startServer(opts: ServerOptions) {
 
   const emit = <E extends EventType>(event: E, data: Events[E]) => {
     const msg = JSON.stringify({ event, data });
-    for (const c of clients) if (c.readyState === c.OPEN) c.send(msg);
+    for (const c of clients.keys()) if (c.readyState === c.OPEN) c.send(msg);
   };
 
-  session.on('frame', (f) => emit('view.frame', f));
+  // Frames go out as binary messages: page width and height (uint16, big-endian), then the JPEG. A client gets the
+  // newest frame once it drew the previous one, so a slow or hidden UI skips frames instead of queuing them. The
+  // browser only streams while some client shows the view, scaled down to the largest size one shows it at.
+  let frame: { seq: number; data: string; width: number; height: number; message?: Buffer } | undefined;
+  let frameSeq = 0;
+  const sendFrame = (ws: WebSocket, c: Client) => {
+    if (!frame || !c.visible || c.busy || c.seen === frame.seq || ws.readyState !== ws.OPEN) return;
+    if (!frame.message) {
+      const size = Buffer.alloc(4);
+      size.writeUInt16BE(frame.width, 0);
+      size.writeUInt16BE(frame.height, 2);
+      frame.message = Buffer.concat([size, Buffer.from(frame.data, 'base64')]);
+    }
+    c.busy = true;
+    c.seen = frame.seq;
+    ws.send(frame.message);
+  };
+  const updateStream = () => {
+    const shown = [...clients.values()].filter((c) => c.visible);
+    const size = shown.length && shown.every((c) => c.size)
+      ? { width: Math.max(...shown.map((c) => c.size!.width)), height: Math.max(...shown.map((c) => c.size!.height)) }
+      : undefined;
+    void session
+      .setFrameSize(size)
+      .then(() => session.setStreaming(shown.length > 0))
+      .catch(() => {});
+  };
+
+  session.on('frame', (f) => {
+    frame = { ...f, seq: ++frameSeq };
+    for (const [ws, c] of clients) sendFrame(ws, c);
+  });
   session.on('pick', (d) => emit('view.pick', { descriptor: d }));
   session.on('url', (url) => emit('view.url', { url }));
   session.on('closed', () => emit('view.status', { state: 'closed' }));
@@ -204,6 +247,7 @@ export async function startServer(opts: ServerOptions) {
 
     'view.start': async ({ browser, width, height, url }) => {
       emit('view.status', { state: 'starting' });
+      frame = undefined;
       try {
         await session.start({ browser, width, height }, url);
         emit('view.status', { state: 'ready' });
@@ -216,6 +260,11 @@ export async function startServer(opts: ServerOptions) {
     'view.navigate': async ({ url }) => (await session.navigate(url), {}),
     'view.reload': async () => (await session.reload(), {}),
     'view.back': async () => (await session.back(), {}),
+    'view.reset': async ({ url }) => {
+      if (liveAbort) throw new Error('Stop the run before resetting the browser');
+      await session.reset(url);
+      return {};
+    },
     'view.mode': async ({ mode }) => (await session.setMode(liveAbort ? 'run' : mode), {}),
     'view.mouse': async (m) => (await session.mouse(m), {}),
     'view.key': async (k) => (await session.key(k), {}),
@@ -226,6 +275,25 @@ export async function startServer(opts: ServerOptions) {
     },
     'view.pickConstraint': ({ constraint }) => session.setPickConstraint(constraint),
     'view.describeParent': async ({ selector }) => ({ descriptor: await session.describeParent(selector) }),
+    'view.frameDrawn': async (_, ws) => {
+      const c = clients.get(ws);
+      if (c) {
+        c.busy = false;
+        sendFrame(ws, c);
+      }
+      return {};
+    },
+    'view.display': async ({ visible, width, height }, ws) => {
+      const c = clients.get(ws);
+      if (c) {
+        c.visible = visible;
+        c.size = { width, height };
+        c.busy = false;
+        updateStream();
+        sendFrame(ws, c);
+      }
+      return {};
+    },
 
     'run.live': async ({ project: p, testId, stepIds, fromStart, params: given }) => {
       if (liveAbort || robotRun) throw new Error('A run is already in progress');
@@ -387,8 +455,14 @@ export async function startServer(opts: ServerOptions) {
       ws.close(1008, 'origin not allowed');
       return;
     }
-    clients.add(ws);
-    ws.on('close', () => clients.delete(ws));
+    const client: Client = { visible: true, busy: false, seen: 0 };
+    clients.set(ws, client);
+    updateStream();
+    sendFrame(ws, client);
+    ws.on('close', () => {
+      clients.delete(ws);
+      updateStream();
+    });
     ws.on('message', async (raw) => {
       let msg: { id: number; type: RequestType; payload: any };
       try {
@@ -399,10 +473,11 @@ export async function startServer(opts: ServerOptions) {
       const handler = handlers[msg.type] as Handler<RequestType> | undefined;
       try {
         if (!handler) throw new Error(`Unknown request ${msg.type}`);
-        const result = await handler(msg.payload ?? {});
-        ws.send(JSON.stringify({ id: msg.id, ok: true, result }));
+        const result = await handler(msg.payload ?? {}, ws);
+        // id 0 is fire-and-forget (mouse moves, frame acks): nobody waits for the answer
+        if (msg.id) ws.send(JSON.stringify({ id: msg.id, ok: true, result }));
       } catch (e) {
-        ws.send(JSON.stringify({ id: msg.id, ok: false, error: (e as Error).message }));
+        if (msg.id) ws.send(JSON.stringify({ id: msg.id, ok: false, error: (e as Error).message }));
       }
     });
   });
