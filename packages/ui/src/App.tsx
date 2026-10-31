@@ -1,7 +1,9 @@
 import {
   AlertTriangle,
+  ArrowUpCircle,
   Check,
   ChevronDown,
+  Download,
   ExternalLink,
   FilePlus2,
   FolderOpen,
@@ -23,6 +25,7 @@ import { memo, useEffect, useState } from 'react';
 import { ENVIRONMENTS, type Environment } from '@joule/core';
 import { api } from './api';
 import { Menu, MenuItem, Resizer } from './components/ui';
+import { desktop, useUpdate } from './desktop';
 import { FolderModal, NewProjectModal, StartModal } from './modals/ProjectModals';
 import { ParamsModal, TestSettingsModal } from './modals/ParamsModal';
 import { AppSettingsModal, SettingsModal } from './modals/SettingsModal';
@@ -30,7 +33,7 @@ import { BrowserPanel } from './panels/BrowserPanel';
 import { DetailsPanel } from './panels/DetailsPanel';
 import { StepsPanel } from './panels/StepsPanel';
 import { TestsPanel } from './panels/TestsPanel';
-import { call, edit, loadProject, openProject, redo, runRobot, save, undo, useStore } from './store';
+import { call, edit, loadProject, openProject, redo, runRobot, save, toast, undo, useStore } from './store';
 
 function usePersistedWidth(key: string, initial: number): [number, (dx: number) => void] {
   const [w, setW] = useState(() => {
@@ -200,6 +203,58 @@ function OutputDrawer() {
   );
 }
 
+/** "New version available" in the status bar; updating is up to the user. */
+function UpdateItem() {
+  const update = useUpdate();
+  const running = useStore((s) => s.run.running);
+  if (!update) return null;
+  const install = async () => {
+    // Quitting with unsaved changes would be blocked (and lose them), so save first.
+    await save();
+    if (useStore.getState().dirty) return toast('Save your changes before updating', 'error');
+    await desktop?.installUpdate();
+  };
+  if (update.status === 'downloading' || update.status === 'installing') {
+    return (
+      <span className="item" style={{ color: 'var(--accent)' }}>
+        <Loader2 size={12} className="spin" />
+        {update.status === 'downloading' ? `Downloading Joule ${update.version}… ${update.progress ?? 0}%` : 'Installing update…'}
+      </span>
+    );
+  }
+  return (
+    <Menu
+      align="right"
+      up
+      button={(toggle) => (
+        <button onClick={toggle} style={{ color: update.status === 'error' ? 'var(--danger)' : 'var(--accent)' }} title={update.error}>
+          {update.status === 'error' ? <AlertTriangle size={12} /> : <ArrowUpCircle size={12} />}
+          {update.status === 'error' ? 'Update failed' : `Joule ${update.version} available`}
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          <div className="heading">Joule {update.version}</div>
+          {update.error && <div className="muted" style={{ padding: '2px 10px 6px', maxWidth: 280 }}>{update.error}</div>}
+          {update.canInstall ? (
+            <MenuItem icon={<Download size={14} />} disabled={running} onClick={() => (close(), void install())}>
+              {running ? 'Update after the run finishes' : update.status === 'error' ? 'Try again' : 'Update and restart'}
+            </MenuItem>
+          ) : (
+            <MenuItem icon={<Download size={14} />} onClick={() => (close(), window.open(update.notesUrl))}>
+              Download from GitHub
+            </MenuItem>
+          )}
+          <MenuItem icon={<ExternalLink size={14} />} onClick={() => (close(), window.open(update.notesUrl))}>
+            Release notes
+          </MenuItem>
+        </>
+      )}
+    </Menu>
+  );
+}
+
 function StatusBar() {
   const connected = useStore((s) => s.connected);
   // only in-app runs are shown here, so the lines of a Robot run don't re-render the status bar
@@ -225,6 +280,7 @@ function StatusBar() {
         </span>
       )}
       <span className="grow" />
+      <UpdateItem />
       <button onClick={() => useStore.setState({ outputOpen: !outputOpen })}>
         <TerminalSquare size={12} /> Output
       </button>

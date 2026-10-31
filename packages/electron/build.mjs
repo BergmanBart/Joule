@@ -15,6 +15,15 @@ await build({
   external: ['electron', 'playwright-core', 'vite', 'bufferutil', 'utf-8-validate'],
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
 });
+// Preloads run sandboxed, which only takes CommonJS.
+await build({
+  entryPoints: [here('src/preload.ts')],
+  outfile: here('dist/preload.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  external: ['electron'],
+});
 cpSync(here('../engine/src/overlay.js'), here('dist/overlay.js'));
 cpSync(here('../engine/src/parse_robot.py'), here('dist/parse_robot.py'));
 cpSync(here('../ui/dist'), here('dist/ui'), { recursive: true });

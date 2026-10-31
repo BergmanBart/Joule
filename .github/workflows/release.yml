@@ -1,0 +1,32 @@
+# Push a tag like v0.2.0 (matching packages/electron/package.json) to build the portable desktop zip and
+# publish it as a GitHub release; the desktop app finds new releases there.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check the tag matches the app version
+        shell: bash
+        run: |
+          version=$(node -p "require('./packages/electron/package.json').version")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
+      - run: npm run package:desktop
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" packages/electron/release/*.zip --title "Joule ${GITHUB_REF_NAME#v}" --generate-notes

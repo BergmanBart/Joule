@@ -2,8 +2,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, Menu, screen, shell, type Rectangle } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, screen, shell, type IpcMainInvokeEvent, type Rectangle } from 'electron';
 import { startServer } from '@joule/server';
+import { getUpdate, installUpdate, startUpdateChecks } from './update';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
@@ -60,6 +61,7 @@ async function createWindow() {
     title: 'Joule',
     icon: join(here, 'icon.png'),
     autoHideMenuBar: true,
+    webPreferences: { preload: join(here, 'preload.cjs') },
   });
   if (state.maximized) win.maximize();
   win.once('ready-to-show', () => win?.show());
@@ -80,7 +82,14 @@ if (!app.requestSingleInstanceLock()) {
     win?.focus();
   });
   Menu.setApplicationMenu(null);
-  app.whenReady().then(createWindow);
+  // Only the UI from our own server may use the desktop bridge.
+  const fromUi = (e: IpcMainInvokeEvent) => !!server && !!e.senderFrame?.url.startsWith(server.url);
+  ipcMain.handle('update:get', (e) => (fromUi(e) ? getUpdate() : undefined));
+  ipcMain.handle('update:install', (e) => (fromUi(e) ? installUpdate() : undefined));
+  app.whenReady().then(async () => {
+    await createWindow();
+    if (app.isPackaged) startUpdateChecks((s) => win?.webContents.send('update', s));
+  });
   app.on('window-all-closed', async () => {
     await server?.close();
     app.quit();

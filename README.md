@@ -36,6 +36,13 @@ Unzip anywhere (also a USB stick or network share) and start `Joule.exe`, with n
 needed. Settings, recent projects and the window position are kept in `data/` next to the exe. The live
 browser view uses the installed Edge or Chrome.
 
+When a newer release is on GitHub, the status bar shows **Joule x.y.z available** (bottom right). **Update and
+restart** downloads it and replaces the app files, keeping `data/`; from a read-only folder it links to the release
+instead.
+
+**Releasing**: bump `version` in `packages/electron/package.json`, commit, then tag and push it
+(`git tag v0.2.0 && git push origin v0.2.0`). The Release workflow builds the zip and publishes the GitHub release.
+
 ### Robot Framework
 
 Running `.robot` files needs Python 3 with `robotframework`, `robotframework-browser` +
