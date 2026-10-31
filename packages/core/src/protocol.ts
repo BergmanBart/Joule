@@ -5,6 +5,7 @@ import type { BrowserName, ElementDescriptor, Environment, Project } from './mod
 export interface AppSettings {
   recent: string[];
   pythonPath?: string;
+  uvPath?: string;
   lastProject?: string;
 }
 
@@ -22,12 +23,24 @@ export interface HighlightRequest {
   all?: boolean;
 }
 
+export interface PlaywrightInfo {
+  version: string;
+  /** Browser builds this Playwright version drives, and whether they are downloaded. */
+  browsers: { name: 'chromium' | 'firefox'; version: string; installed: boolean }[];
+}
+
 export interface DepsInfo {
+  uv?: { path: string; version: string };
   python?: { path: string; version: string };
   robot?: string;
   browser?: string;
+  batteries?: string;
   browserInit: boolean;
   pabot?: string;
+  /** Playwright inside the installed Browser library. */
+  playwright?: PlaywrightInfo;
+  /** pyproject.toml / uv.lock in the project; `synced`: .venv has exactly the locked versions (unknown without uv). */
+  env: { pyproject: boolean; lock: boolean; synced?: boolean; pins: Record<string, string>; locked: Record<string, string> };
   ok: boolean;
   installCommands: string[];
 }
@@ -77,7 +90,13 @@ export interface Requests {
   'run.continue': [{}, {}];
   'run.stop': [{}, {}];
   'deps.check': [{}, DepsInfo];
-  'deps.install': [{ skipBrowsers: boolean }, { ok: boolean }];
+  /**
+   * Install uv when missing, sync .venv with uv.lock and download the matching browser. `pins`: exact versions to put
+   * in pyproject.toml first (Browser library and its batteries get the same one); `upgrade`: move everything to the latest.
+   */
+  'deps.install': [{ pins?: { robot?: string; browser?: string }; upgrade?: boolean }, { ok: boolean }];
+  /** Released versions on PyPI, newest first, as suggestions for the version fields. */
+  'deps.versions': [{}, { robot: string[]; browser: string[] }];
 }
 
 export type RequestType = keyof Requests;

@@ -60,8 +60,8 @@ async function run(dir: string, flags: Record<string, string | boolean>): Promis
   }
   const deps = await checkDeps(dir);
   if (!deps.ok || !deps.python) {
-    console.error('Robot Framework with the Browser library is not installed. Install it with:\n');
-    console.error(installCommands(dir, project.settings.browser === 'msedge').join('\n'));
+    console.error('Robot Framework with the Browser library is not installed. Install the locked versions with:\n');
+    console.error(installCommands(dir, project.settings.browser, !!deps.uv).join('\n'));
     return 2;
   }
   let testIds: string[] | undefined;

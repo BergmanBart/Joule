@@ -322,7 +322,8 @@ describe('robot generation', () => {
     expect(Object.keys(files).sort()).toEqual(
       [
         'env/ACC.py', 'env/DEV.py', 'env/PROD.py', 'env/TEST.py', 'resources/JouleLib.py', 'resources/keywords.resource',
-        'resources/joule.resource', 'run.bat', 'run.sh', 'run_parallel.bat', 'run_plan.txt', 'tests/Test1.robot',
+        'resources/joule.resource', 'run.bat', 'run.sh', 'run_parallel.bat', 'run_plan.txt', 'setup.bat', 'setup.sh',
+        'tests/Test1.robot',
       ].sort(),
     );
     expect(files['env/PROD.py']).toContain('USERNAME = "prod-user"');

@@ -1,6 +1,6 @@
-import { ArrowDown, CheckCircle2, Download, Loader2, RefreshCw, Settings, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUpCircle, CheckCircle2, Download, Loader2, RefreshCw, Settings, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { BROWSERS, effectiveRunPlan, ENVIRONMENTS, type DepsInfo, type Settings as ProjectSettings } from '@joule/core';
+import { BROWSER_PKG, BROWSERS, effectiveRunPlan, ENVIRONMENTS, ROBOT_PKG, type DepsInfo, type Requests, type Settings as ProjectSettings } from '@joule/core';
 import { api } from '../api';
 import { Modal, NumberField, TextField } from '../components/ui';
 import { call, edit, save, startView, useStore } from '../store';
@@ -168,21 +168,37 @@ function RunPlan() {
 
 function Deps() {
   const [deps, setDeps] = useState<DepsInfo | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const [versions, setVersions] = useState<{ robot: string[]; browser: string[] }>({ robot: [], browser: [] });
+  const [robotPin, setRobotPin] = useState('');
+  const [browserPin, setBrowserPin] = useState('');
   const browser = useStore((s) => s.project?.settings.browser);
   const check = async () => {
     setDeps(null);
-    setDeps((await call(api.request('deps.check', {}))) ?? null);
+    const d = (await call(api.request('deps.check', {}))) ?? null;
+    setDeps(d);
+    setRobotPin(d?.env.pins[ROBOT_PKG] ?? '');
+    setBrowserPin(d?.env.pins[BROWSER_PKG] ?? '');
   };
   useEffect(() => {
     void check();
+    void call(api.request('deps.versions', {})).then((v) => v && setVersions(v));
     return api.on('deps.output', ({ line }) => setLog((l) => [...l.slice(-300), line]));
   }, []);
-  const Row = ({ ok, label, value }: { ok: boolean; label: string; value?: string }) => (
+  const install = async (payload: Requests['deps.install'][0]) => {
+    setBusy(true);
+    setLog([]);
+    await call(api.request('deps.install', payload));
+    setBusy(false);
+    await check();
+  };
+  const Row = ({ ok, label, value, optional }: { ok: boolean; label: string; value?: string; optional?: boolean }) => (
     <div className="row" style={{ marginBottom: 6 }}>
-      {ok ? <CheckCircle2 size={15} color="var(--ok)" /> : <XCircle size={15} color="var(--danger)" />}
-      <span style={{ width: 210 }}>{label}</span>
+      <span style={{ display: 'flex', flexShrink: 0 }}>
+        {ok ? <CheckCircle2 size={15} color="var(--ok)" /> : optional ? <AlertTriangle size={15} color="var(--warn)" /> : <XCircle size={15} color="var(--danger)" />}
+      </span>
+      <span style={{ width: 210, flexShrink: 0 }}>{label}</span>
       <span className="mono muted">{value ?? 'not found'}</span>
     </div>
   );
@@ -192,40 +208,93 @@ function Deps() {
         <Loader2 className="spin" size={20} />
       </div>
     );
+  const { env, playwright } = deps;
+  // Edge is the installed one; Chromium and Firefox are builds that belong to the Browser library's Playwright
+  const needed = browser === 'msedge' ? undefined : playwright?.browsers.find((b) => b.name === browser);
+  const browserReady = deps.browserInit && (browser === 'msedge' || !!needed?.installed);
+  const playwrightValue = playwright
+    ? [
+        playwright.version,
+        ...playwright.browsers.map((b) => `${b.name === 'chromium' ? 'Chromium' : 'Firefox'} ${b.version}${b.installed ? '' : ' (not downloaded)'}`),
+        ...(browser === 'msedge' ? ['Edge: installed one'] : []),
+      ].join(' · ')
+    : undefined;
+  const envValue = !env.pyproject
+    ? 'no pyproject.toml yet'
+    : !env.lock
+      ? 'no uv.lock yet'
+      : env.synced === undefined
+        ? 'uv.lock present (uv needed to compare)'
+        : env.synced
+          ? '.venv matches uv.lock'
+          : '.venv or uv.lock is out of date with pyproject.toml';
+  const inSync = env.lock && env.synced === true;
+  // a version typed in that differs from the pin; an empty field leaves the pin as it is
+  const newPin = (typed: string, pkg: string) => (typed.trim() && typed.trim() !== env.pins[pkg] ? typed.trim() : undefined);
+  const pins = { robot: newPin(robotPin, ROBOT_PKG), browser: newPin(browserPin, BROWSER_PKG) };
   return (
     <>
+      <Row ok={!!deps.uv} label="uv" value={deps.uv ? `${deps.uv.version} (${deps.uv.path})` : 'not found: installed with the button below'} />
       <Row ok={!!deps.python} label="Python 3" value={deps.python ? `${deps.python.version} (${deps.python.path})` : undefined} />
       <Row ok={!!deps.robot} label="Robot Framework" value={deps.robot} />
-      <Row ok={!!deps.browser} label="Browser library" value={deps.browser} />
-      <Row ok={deps.browserInit} label="Browser runtime" value={deps.browserInit ? 'ready' : undefined} />
-      <Row ok={!!deps.pabot} label="pabot (parallel runs)" value={deps.pabot ?? 'optional'} />
-      {!deps.ok && (
+      <Row
+        ok={!!deps.browser && (!deps.batteries || deps.batteries === deps.browser)}
+        label="Browser library"
+        value={deps.browser && (deps.batteries ? `${deps.browser} (batteries ${deps.batteries})` : deps.browser)}
+      />
+      <Row ok={browserReady} label="Playwright · browsers" value={playwrightValue} />
+      <Row ok={!!deps.pabot} optional label="pabot (parallel runs)" value={deps.pabot ?? 'optional'} />
+      <Row ok={!!inSync} optional={env.lock} label="Locked versions" value={envValue} />
+
+      <div className="field" style={{ marginTop: 14 }}>
+        <label>Versions for this project (pyproject.toml)</label>
+        <div className="row">
+          <span className="muted">Robot Framework</span>
+          <input className="input mono" style={{ width: 110 }} list="robot-versions" placeholder="version" value={robotPin} onChange={(e) => setRobotPin(e.target.value)} />
+          <span className="muted" style={{ marginLeft: 8 }}>Browser library</span>
+          <input className="input mono" style={{ width: 110 }} list="browser-versions" placeholder="version" value={browserPin} onChange={(e) => setBrowserPin(e.target.value)} />
+          <button
+            className="btn"
+            disabled={busy || !(pins.robot || pins.browser)}
+            onClick={() => void install({ pins })}
+          >
+            Apply
+          </button>
+          <button className="btn" disabled={busy} onClick={() => void install({ upgrade: true })}>
+            <ArrowUpCircle size={13} /> Update all to latest
+          </button>
+        </div>
+        <datalist id="robot-versions">
+          {versions.robot.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+        <datalist id="browser-versions">
+          {versions.browser.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+        <p className="muted" style={{ margin: '6px 0 0' }}>
+          The Browser library version decides the Playwright version and the Chromium / Firefox builds the tests run in; its batteries get
+          the same version. uv.lock pins every package exactly, so setup.bat / setup.sh install the same versions anywhere (CI).
+        </p>
+      </div>
+
+      {(!deps.ok || !inSync) && (
         <>
           <div className="notice warn" style={{ marginTop: 12 }}>
-            Running .robot files needs the packages above. Install them in a virtual environment in the project folder, or run these commands yourself:
+            Install the locked versions into a .venv in the project folder with the button, or run these commands yourself:
           </div>
           <pre className="cmds">{deps.installCommands.join('\n')}</pre>
         </>
       )}
-      <div className="row">
-        <button className="btn" onClick={() => void check()}>
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn" disabled={busy} onClick={() => void check()}>
           <RefreshCw size={13} /> Check again
         </button>
-        {!deps.ok && (
-          <button
-            className="btn primary"
-            disabled={installing || !deps.python}
-            onClick={async () => {
-              setInstalling(true);
-              setLog([]);
-              await call(api.request('deps.install', { skipBrowsers: browser === 'msedge' }));
-              setInstalling(false);
-              await check();
-            }}
-          >
-            {installing ? <Loader2 size={13} className="spin" /> : <Download size={13} />} Install into .venv
-          </button>
-        )}
+        <button className={`btn${deps.ok && inSync && browserReady ? '' : ' primary'}`} disabled={busy} onClick={() => void install({})}>
+          {busy ? <Loader2 size={13} className="spin" /> : <Download size={13} />} {env.lock ? 'Sync .venv with uv.lock' : 'Install into .venv'}
+        </button>
       </div>
       {log.length > 0 && <pre className="cmds" style={{ marginTop: 12, maxHeight: 200, overflow: 'auto' }}>{log.join('\n')}</pre>}
     </>
@@ -267,6 +336,7 @@ export function SettingsModal({ tab = 'general' }: { tab?: 'general' | 'runplan'
 export function AppSettingsModal() {
   const settings = useStore((s) => s.settings);
   const [python, setPython] = useState(settings.pythonPath ?? '');
+  const [uv, setUv] = useState(settings.uvPath ?? '');
   const apply = async (next: typeof settings) => {
     const r = await call(api.request('app.saveSettings', { settings: next }));
     if (r) useStore.setState({ settings: r });
@@ -279,6 +349,15 @@ export function AppSettingsModal() {
           <div className="row">
             <input className="input mono" value={python} placeholder="Auto: .venv in the project, then python on PATH" onChange={(e) => setPython(e.target.value)} />
             <button className="btn" onClick={() => void apply({ ...settings, pythonPath: python || undefined })}>
+              Save
+            </button>
+          </div>
+        </div>
+        <div className="field">
+          <label>uv (optional)</label>
+          <div className="row">
+            <input className="input mono" value={uv} placeholder="Auto: uv on PATH, then ~/.local/bin" onChange={(e) => setUv(e.target.value)} />
+            <button className="btn" onClick={() => void apply({ ...settings, uvPath: uv || undefined })}>
               Save
             </button>
           </div>

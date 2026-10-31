@@ -40,9 +40,28 @@ browser view uses the installed Edge or Chrome.
 
 Running `.robot` files needs Python 3 with `robotframework`, `robotframework-browser` +
 `robotframework-browser-batteries` (the Browser library's Node.js side, prebuilt, so no Node.js/npm is needed)
-and, for parallel runs, `robotframework-pabot`. **Project settings → Robot Framework** checks this and can install
-everything into a `.venv` in the project folder. Python is looked up in this order: app setting,
-`$JOULE_PYTHON`, a `.venv` in the project folder or any parent, `python` on `PATH`.
+and, for parallel runs, `robotframework-pabot`. Each project has its own versions, managed with
+[uv](https://docs.astral.sh/uv/):
+
+- `pyproject.toml` lists the packages. Joule pins Robot Framework and the Browser library to exact versions, and
+  the batteries always get the same version as the Browser library. Edit the file, or pick versions in Joule.
+- `uv.lock` holds the exact version of every package, so every machine and pipeline installs the same set.
+- The **Browser library version decides the Playwright version**, and with that the Chromium / Firefox build the
+  tests run in (each Playwright release works with one build). Microsoft Edge is the installed Edge.
+
+**Project settings → Robot Framework** shows the installed versions and the Playwright and browser versions they
+bring. There you can pick other versions (*Apply*), *Update all to latest*, or *Sync .venv with uv.lock*. That
+installs uv if needed (its official installer, into `~/.local/bin`), syncs `.venv` in the project folder and
+downloads the matching browser into it. uv is looked up in this order: app setting, `$JOULE_UV`, `uv` on `PATH`,
+`~/.local/bin`. Python is looked up in this order: app setting, `$JOULE_PYTHON`, a `.venv` in the project folder or
+any parent, `python` on `PATH`. Without a Python, uv downloads one.
+
+In a pipeline, run `setup.bat` / `setup.sh` (`uv sync --locked` + the browser download) and then `run.bat` / `run.sh`:
+
+```sh
+./setup.sh                       # fails when uv.lock is not up to date with pyproject.toml
+./run.sh TEST -v HEADLESS:True
+```
 
 ## Using it
 
@@ -84,8 +103,11 @@ resources/joule.resource      browser setup; override with -v BROWSER:firefox -v
 resources/JouleLib.py         Pause For Key
 custom_keywords/              your own keyword files (not generated; imported by the tests that use them)
 env/DEV.py … env/PROD.py      parameter values per environment
-run.bat / run.sh              run everything:  run.bat PROD -v HEADLESS:True
+run.bat / run.sh              run everything:  run.bat PROD -v HEADLESS:True  (uses .venv when it is there)
 run_parallel.bat, run_plan.txt   run plan for pabot
+pyproject.toml, uv.lock       Robot Framework / Browser library versions (written once, then yours and uv's)
+setup.bat / setup.sh          install the locked versions + matching browser into .venv (for CI)
+.venv/                        Python environment with the browser builds; not something to commit
 screenshots/  logs/
 ```
 

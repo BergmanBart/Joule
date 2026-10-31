@@ -26,6 +26,7 @@ import {
   installCommands,
   installDeps,
   LiveRunner,
+  releasedVersions,
   RobotRun,
   scanCustomKeywords,
   timestamp,
@@ -153,6 +154,8 @@ export async function startServer(opts: ServerOptions) {
     settings = { ...settings, lastProject: dir, recent: [dir, ...settings.recent.filter((d) => d !== dir)].slice(0, 10) };
     await writeSettings(settings);
   }
+
+  const toolPaths = () => ({ python: settings.pythonPath, uv: settings.uvPath });
 
   async function python() {
     const py = await findPython(projectDir ?? process.cwd(), settings.pythonPath);
@@ -357,7 +360,7 @@ export async function startServer(opts: ServerOptions) {
     'run.robot': async ({ project: p, testIds, headless, parallel }) => {
       if (liveAbort || robotRun) throw new Error('A run is already in progress');
       const dir = requireProject();
-      const deps = await checkDeps(dir, settings.pythonPath);
+      const deps = await checkDeps(dir, toolPaths());
       if (!deps.ok || !deps.python) throw new Error('DEPS: Robot Framework with the Browser library is not installed for this project.');
       project = await saveProject(dir, p);
       const run = new RobotRun({
@@ -395,14 +398,20 @@ export async function startServer(opts: ServerOptions) {
 
     'deps.check': async () => {
       const dir = projectDir ?? process.cwd();
-      const status = await checkDeps(dir, settings.pythonPath);
-      return { ...status, installCommands: installCommands(dir, project?.settings.browser === 'msedge') };
+      const status = await checkDeps(dir, toolPaths());
+      return { ...status, installCommands: installCommands(dir, project?.settings.browser ?? 'chromium', !!status.uv) };
     },
-    'deps.install': async ({ skipBrowsers }) => {
+    'deps.install': async ({ pins, upgrade }) => {
       const dir = requireProject();
-      const ok = await installDeps(dir, skipBrowsers, (line) => emit('deps.output', { line }));
+      const p = project!;
+      const ok = await installDeps(
+        dir,
+        { projectName: p.name, browser: p.settings.browser, pins, upgrade, uv: settings.uvPath },
+        (line) => emit('deps.output', { line }),
+      );
       return { ok };
     },
+    'deps.versions': async () => releasedVersions(),
   };
 
   // ---------- HTTP ----------

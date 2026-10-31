@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { CUSTOM_KEYWORDS_DIR } from './custom';
 import { Project } from './model';
+import { defaultPyproject, PYPROJECT_FILE } from './pyproject';
 import { generateRobotFiles } from './robot/generate';
 
 export const PROJECT_FILE = 'joule.json';
@@ -47,10 +48,17 @@ export async function saveProject(dir: string, project: Project): Promise<Projec
   await mkdir(isAbsolute(shots) ? shots : join(dir, shots), { recursive: true });
   // where users drop their own keyword files (shown under Reusable keywords → Custom Keywords)
   await mkdir(join(dir, CUSTOM_KEYWORDS_DIR), { recursive: true });
+  await ensurePyproject(dir, saved.name);
   await writeIfChanged(join(dir, PROJECT_FILE), JSON.stringify(saved, null, 2) + '\n');
   // Old generated helpers (uitester.resource, UITesterLib.py) went with the stale-file cleanup above.
   await rm(join(dir, LEGACY_PROJECT_FILE), { force: true });
   return saved;
+}
+
+/** pyproject.toml is not a generated file: it is written once and from then on edited by the user and uv. */
+export async function ensurePyproject(dir: string, projectName: string): Promise<void> {
+  const path = join(dir, PYPROJECT_FILE);
+  if (!existsSync(path)) await writeFile(path, defaultPyproject(projectName), 'utf8');
 }
 
 /**
