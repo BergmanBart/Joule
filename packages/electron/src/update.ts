@@ -16,13 +16,23 @@ const ASSET = /-win-x64\.zip$/;
 
 /** Sent to the UI (see packages/ui/src/desktop.ts). */
 export interface UpdateState {
-  version: string;
-  notesUrl: string;
-  /** False when the app folder is read-only (network share, locked USB stick): the UI links to the release instead. */
-  canInstall: boolean;
-  status: 'available' | 'downloading' | 'installing' | 'error';
-  progress?: number;
-  error?: string;
+  /** The running version. */
+  current: string;
+  checking: boolean;
+  /** When GitHub was last asked, whatever the answer (ms). */
+  checkedAt?: number;
+  /** Why the last check failed (offline, rate limit, …). */
+  checkError?: string;
+  /** A newer release, once found. */
+  available?: {
+    version: string;
+    notesUrl: string;
+    /** Why Joule can't replace itself (read-only folder, running from source); the UI links to the release instead. */
+    blocked?: string;
+    status: 'idle' | 'downloading' | 'installing' | 'error';
+    progress?: number;
+    error?: string;
+  };
 }
 
 interface Release {
@@ -34,13 +44,17 @@ interface Release {
 const appDir = dirname(process.execPath);
 const updateDir = join(appDir, 'data', 'update');
 
-let state: UpdateState | undefined;
+let state: UpdateState = { current: app.getVersion(), checking: false };
 let asset: Release['assets'][number] | undefined;
-let notify: (s: UpdateState | undefined) => void = () => {};
+let notify: (s: UpdateState) => void = () => {};
 
-function set(next: UpdateState | undefined) {
-  state = next;
+function set(patch: Partial<UpdateState>) {
+  state = { ...state, ...patch };
   notify(state);
+}
+
+function setAvailable(patch: Partial<NonNullable<UpdateState['available']>>) {
+  if (state.available) set({ available: { ...state.available, ...patch } });
 }
 
 export const getUpdate = () => state;
@@ -69,34 +83,57 @@ function writable(dir: string) {
   }
 }
 
-async function check() {
-  if (state && state.status !== 'available') return;
+/** Asks GitHub for the latest release; resolves with the new state. */
+export async function checkForUpdates() {
+  const busy = state.available?.status === 'downloading' || state.available?.status === 'installing';
+  if (state.checking || busy) return state;
+  set({ checking: true });
   try {
     const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Joule/${app.getVersion()}` },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Joule/${state.current}` },
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      throw new Error(
+        res.status === 404 ? 'no releases are published yet' : res.status === 403 || res.status === 429 ? 'GitHub limits how often this can be checked, try again later' : `GitHub answered HTTP ${res.status}`,
+      );
+    }
     const release = (await res.json()) as Release;
     const version = release.tag_name.replace(/^v/, '');
-    if (!isNewer(version, app.getVersion())) return;
     asset = release.assets.find((a) => ASSET.test(a.name));
-    set({ version, notesUrl: release.html_url, canInstall: !!asset && writable(appDir), status: 'available' });
-  } catch {
-    /* offline: try again later */
+    const blocked = !app.isPackaged
+      ? 'Running from source: build or download the new version.'
+      : !asset
+        ? 'This release has no Windows zip.'
+        : !writable(appDir)
+          ? "Joule's folder is read-only: download the new version and unzip it over this one."
+          : undefined;
+    set({
+      checking: false,
+      checkedAt: Date.now(),
+      checkError: undefined,
+      available: isNewer(version, state.current) ? { version, notesUrl: release.html_url, blocked, status: 'idle' } : undefined,
+    });
+  } catch (e) {
+    set({ checking: false, checkedAt: Date.now(), checkError: (e as Error).message });
   }
+  return state;
 }
 
-/** Checks shortly after startup and then every few hours; `onChange` gets each new state. */
-export function startUpdateChecks(onChange: (s: UpdateState | undefined) => void) {
+/**
+ * `onChange` gets each new state. The packaged app also checks shortly after startup and then every few hours
+ * (from source only when asked).
+ */
+export function startUpdateChecks(onChange: (s: UpdateState) => void) {
   notify = onChange;
+  if (!app.isPackaged) return;
   // Leftovers of an earlier update (or a failed one).
   rmSync(updateDir, { recursive: true, force: true });
-  setTimeout(check, 5_000);
-  setInterval(check, 6 * 60 * 60 * 1000).unref();
+  setTimeout(checkForUpdates, 5_000);
+  setInterval(checkForUpdates, 6 * 60 * 60 * 1000).unref();
 }
 
 async function download(url: string, file: string, size: number) {
-  const res = await net.fetch(url, { headers: { 'User-Agent': `Joule/${app.getVersion()}` } });
+  const res = await net.fetch(url, { headers: { 'User-Agent': `Joule/${state.current}` } });
   if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status})`);
   const total = Number(res.headers.get('content-length')) || size;
   const hash = createHash('sha256');
@@ -109,7 +146,7 @@ async function download(url: string, file: string, size: number) {
       if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
       received += chunk.length;
       const pct = Math.floor((received / total) * 100);
-      if (pct !== shown && state) set({ ...state, progress: (shown = pct) });
+      if (pct !== shown) setAvailable({ progress: (shown = pct) });
     }
   } finally {
     await new Promise((r) => out.end(r));
@@ -128,8 +165,9 @@ const ps = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** Downloads and unpacks the update, starts the script that swaps it in, and quits. */
 export async function installUpdate() {
-  if (!state?.canInstall || !asset || state.status === 'downloading' || state.status === 'installing') return;
-  set({ ...state, status: 'downloading', progress: 0, error: undefined });
+  const { available } = state;
+  if (!available || available.blocked || !asset || available.status === 'downloading' || available.status === 'installing') return;
+  setAvailable({ status: 'downloading', progress: 0, error: undefined });
   try {
     rmSync(updateDir, { recursive: true, force: true });
     mkdirSync(updateDir, { recursive: true });
@@ -137,7 +175,7 @@ export async function installUpdate() {
     const sha256 = await download(asset.browser_download_url, zip, asset.size);
     if (asset.digest?.startsWith('sha256:') && asset.digest.slice(7) !== sha256) throw new Error('The download is damaged (checksum mismatch)');
 
-    set({ ...state, status: 'installing' });
+    setAvailable({ status: 'installing' });
     const unpacked = join(updateDir, 'files');
     mkdirSync(unpacked);
     // Windows 10+ ships bsdtar, which also reads zips.
@@ -163,6 +201,6 @@ export async function installUpdate() {
     }).unref();
     app.quit();
   } catch (e) {
-    set({ ...state, status: 'error', error: (e as Error).message });
+    setAvailable({ status: 'error', error: (e as Error).message });
   }
 }

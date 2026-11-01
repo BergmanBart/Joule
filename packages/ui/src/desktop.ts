@@ -1,25 +1,33 @@
 /** Features of the desktop app, from its preload (packages/electron/src/preload.ts); undefined in a browser or VS Code. */
 import { useEffect, useState } from 'react';
+import { save, toast, useStore } from './store';
 
 /** Mirrors UpdateState in packages/electron/src/update.ts. */
 export interface UpdateState {
-  version: string;
-  notesUrl: string;
-  canInstall: boolean;
-  status: 'available' | 'downloading' | 'installing' | 'error';
-  progress?: number;
-  error?: string;
+  current: string;
+  checking: boolean;
+  checkedAt?: number;
+  checkError?: string;
+  available?: {
+    version: string;
+    notesUrl: string;
+    blocked?: string;
+    status: 'idle' | 'downloading' | 'installing' | 'error';
+    progress?: number;
+    error?: string;
+  };
 }
 
 interface JouleDesktop {
-  getUpdate(): Promise<UpdateState | undefined>;
+  getUpdate(): Promise<UpdateState>;
+  checkForUpdates(): Promise<UpdateState>;
   installUpdate(): Promise<void>;
-  onUpdate(fn: (s: UpdateState | undefined) => void): () => void;
+  onUpdate(fn: (s: UpdateState) => void): () => void;
 }
 
 export const desktop = (window as { jouleDesktop?: JouleDesktop }).jouleDesktop;
 
-/** The newer release on GitHub, once the desktop app has found one. */
+/** The desktop app's version and update status; undefined outside the desktop app. */
 export function useUpdate() {
   const [update, setUpdate] = useState<UpdateState>();
   useEffect(() => {
@@ -28,4 +36,11 @@ export function useUpdate() {
     return desktop.onUpdate(setUpdate);
   }, []);
   return update;
+}
+
+/** Saves first: quitting with unsaved changes would be blocked (and lose them). */
+export async function installUpdate() {
+  await save();
+  if (useStore.getState().dirty) return toast('Save your changes before updating', 'error');
+  await desktop?.installUpdate();
 }

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, Menu, screen, shell, type IpcMainInvokeEvent, type Rectangle } from 'electron';
 import { startServer } from '@joule/server';
-import { getUpdate, installUpdate, startUpdateChecks } from './update';
+import { checkForUpdates, getUpdate, installUpdate, startUpdateChecks } from './update';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
@@ -85,10 +85,11 @@ if (!app.requestSingleInstanceLock()) {
   // Only the UI from our own server may use the desktop bridge.
   const fromUi = (e: IpcMainInvokeEvent) => !!server && !!e.senderFrame?.url.startsWith(server.url);
   ipcMain.handle('update:get', (e) => (fromUi(e) ? getUpdate() : undefined));
+  ipcMain.handle('update:check', (e) => (fromUi(e) ? checkForUpdates() : undefined));
   ipcMain.handle('update:install', (e) => (fromUi(e) ? installUpdate() : undefined));
   app.whenReady().then(async () => {
     await createWindow();
-    if (app.isPackaged) startUpdateChecks((s) => win?.webContents.send('update', s));
+    startUpdateChecks((s) => win?.webContents.send('update', s));
   });
   app.on('window-all-closed', async () => {
     await server?.close();

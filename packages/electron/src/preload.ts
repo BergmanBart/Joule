@@ -3,10 +3,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { UpdateState } from './update';
 
 contextBridge.exposeInMainWorld('jouleDesktop', {
-  getUpdate: (): Promise<UpdateState | undefined> => ipcRenderer.invoke('update:get'),
+  getUpdate: (): Promise<UpdateState> => ipcRenderer.invoke('update:get'),
+  checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
-  onUpdate: (fn: (s: UpdateState | undefined) => void) => {
-    const listener = (_e: unknown, s: UpdateState | undefined) => fn(s);
+  onUpdate: (fn: (s: UpdateState) => void) => {
+    const listener = (_e: unknown, s: UpdateState) => fn(s);
     ipcRenderer.on('update', listener);
     return () => void ipcRenderer.off('update', listener);
   },

@@ -25,7 +25,7 @@ import { memo, useEffect, useState } from 'react';
 import { ENVIRONMENTS, type Environment } from '@joule/core';
 import { api } from './api';
 import { Menu, MenuItem, Resizer } from './components/ui';
-import { desktop, useUpdate } from './desktop';
+import { installUpdate, useUpdate } from './desktop';
 import { FolderModal, NewProjectModal, StartModal } from './modals/ProjectModals';
 import { ParamsModal, TestSettingsModal } from './modals/ParamsModal';
 import { AppSettingsModal, SettingsModal } from './modals/SettingsModal';
@@ -33,7 +33,7 @@ import { BrowserPanel } from './panels/BrowserPanel';
 import { DetailsPanel } from './panels/DetailsPanel';
 import { StepsPanel } from './panels/StepsPanel';
 import { TestsPanel } from './panels/TestsPanel';
-import { call, edit, loadProject, openProject, redo, runRobot, save, toast, undo, useStore } from './store';
+import { call, edit, loadProject, openProject, redo, runRobot, save, undo, useStore } from './store';
 
 function usePersistedWidth(key: string, initial: number): [number, (dx: number) => void] {
   const [w, setW] = useState(() => {
@@ -205,15 +205,9 @@ function OutputDrawer() {
 
 /** "New version available" in the status bar; updating is up to the user. */
 function UpdateItem() {
-  const update = useUpdate();
+  const update = useUpdate()?.available;
   const running = useStore((s) => s.run.running);
   if (!update) return null;
-  const install = async () => {
-    // Quitting with unsaved changes would be blocked (and lose them), so save first.
-    await save();
-    if (useStore.getState().dirty) return toast('Save your changes before updating', 'error');
-    await desktop?.installUpdate();
-  };
   if (update.status === 'downloading' || update.status === 'installing') {
     return (
       <span className="item" style={{ color: 'var(--accent)' }}>
@@ -237,8 +231,8 @@ function UpdateItem() {
         <>
           <div className="heading">Joule {update.version}</div>
           {update.error && <div className="muted" style={{ padding: '2px 10px 6px', maxWidth: 280 }}>{update.error}</div>}
-          {update.canInstall ? (
-            <MenuItem icon={<Download size={14} />} disabled={running} onClick={() => (close(), void install())}>
+          {!update.blocked ? (
+            <MenuItem icon={<Download size={14} />} disabled={running} onClick={() => (close(), void installUpdate())}>
               {running ? 'Update after the run finishes' : update.status === 'error' ? 'Try again' : 'Update and restart'}
             </MenuItem>
           ) : (

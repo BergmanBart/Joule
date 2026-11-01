@@ -1,8 +1,9 @@
-import { AlertTriangle, ArrowDown, ArrowUpCircle, CheckCircle2, Download, Loader2, RefreshCw, Settings, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUpCircle, CheckCircle2, Download, ExternalLink, Loader2, RefreshCw, Settings, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { BROWSER_PKG, BROWSERS, effectiveRunPlan, ENVIRONMENTS, ROBOT_PKG, type DepsInfo, type Requests, type Settings as ProjectSettings } from '@joule/core';
 import { api } from '../api';
 import { Modal, NumberField, TextField } from '../components/ui';
+import { desktop, installUpdate, useUpdate } from '../desktop';
 import { call, edit, save, startView, useStore } from '../store';
 
 const RESOLUTIONS = [
@@ -333,6 +334,67 @@ export function SettingsModal({ tab = 'general' }: { tab?: 'general' | 'runplan'
   );
 }
 
+/** Version and updates of the desktop app; hidden in the browser and VS Code. */
+function VersionField() {
+  const update = useUpdate();
+  const running = useStore((s) => s.run.running);
+  if (!update) return null;
+  const a = update.available;
+  const busy = a?.status === 'downloading' || a?.status === 'installing';
+  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const [icon, text] = update.checking
+    ? [<Loader2 size={15} className="spin" />, 'Checking for updates…']
+    : a?.status === 'downloading'
+      ? [<Loader2 size={15} className="spin" />, `Downloading Joule ${a.version}… ${a.progress ?? 0}%`]
+      : a?.status === 'installing'
+        ? [<Loader2 size={15} className="spin" />, 'Installing, Joule restarts in a moment…']
+        : a?.status === 'error'
+          ? [<XCircle size={15} color="var(--danger)" />, `Updating to ${a.version} failed: ${a.error}`]
+          : a
+            ? [<ArrowUpCircle size={15} color="var(--accent)" />, `Joule ${a.version} is available`]
+            : update.checkError
+              ? [<AlertTriangle size={15} color="var(--warn)" />, `Couldn't check for updates: ${update.checkError}`]
+              : update.checkedAt
+                ? [<CheckCircle2 size={15} color="var(--ok)" />, `Joule is up to date (checked at ${time(update.checkedAt)})`]
+                : [undefined, 'Not checked for updates yet'];
+  return (
+    <div className="field">
+      <label>Version</label>
+      <div className="row">
+        <span className="mono grow">Joule {update.current}</span>
+        <button className="btn" disabled={update.checking || busy} onClick={() => void desktop?.checkForUpdates()}>
+          <RefreshCw size={13} /> Check for updates
+        </button>
+      </div>
+      <div className="row">
+        {icon && <span style={{ display: 'flex', flexShrink: 0 }}>{icon}</span>}
+        <span className="grow">{text}</span>
+        {a && !busy && (
+          <>
+            <a className="btn" href={a.notesUrl} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} /> Release notes
+            </a>
+            {a.blocked ? (
+              <a className="btn primary" href={a.notesUrl} target="_blank" rel="noreferrer">
+                <Download size={13} /> Download
+              </a>
+            ) : (
+              <button className="btn primary" disabled={running} onClick={() => void installUpdate()}>
+                <Download size={13} /> {a.status === 'error' ? 'Try again' : 'Update and restart'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {a && !busy && (a.blocked || running) && (
+        <p className="muted" style={{ margin: 0 }}>
+          {a.blocked ?? 'Updating is possible once the run finishes.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function AppSettingsModal() {
   const settings = useStore((s) => s.settings);
   const [python, setPython] = useState(settings.pythonPath ?? '');
@@ -344,6 +406,7 @@ export function AppSettingsModal() {
   return (
     <Modal title="App settings" onClose={() => useStore.setState({ modal: null })}>
       <div className="modal-body">
+        <VersionField />
         <div className="field">
           <label>Python interpreter (optional)</label>
           <div className="row">
