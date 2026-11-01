@@ -620,6 +620,7 @@ function argHint(a: CustomKeywordArg, required: boolean): string {
 
 function CustomCallDetails({ step, upd }: { step: CustomCallStep; upd: Upd }) {
   const def = findCustomKeyword(useStore((s) => s.customKeywords), step);
+  const firefox = useStore((s) => s.project?.settings.browser === 'firefox');
   const setArg = (name: string, value: string | undefined) =>
     upd((s) => {
       if (s.type !== 'customCall') return s;
@@ -693,7 +694,11 @@ function CustomCallDetails({ step, upd }: { step: CustomCallStep; upd: Upd }) {
           <Code2 size={13} /> Convert to Robot code
         </button>
       </div>
-      <div className="notice info" style={{ marginTop: 12 }}>Custom keywords run with Robot Framework; they are skipped when running inside the app.</div>
+      <div className="notice info" style={{ marginTop: 12 }}>
+        {firefox
+          ? 'Custom keywords run with Robot Framework; with Firefox they are skipped when running inside the app.'
+          : 'Custom keywords run with Robot Framework, also inside the app: Robot attaches to the browser view, which takes a few seconds per call.'}
+      </div>
     </>
   );
 }

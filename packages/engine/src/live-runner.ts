@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { Locator as PwLocator, Page } from 'playwright-core';
 import { buildSelector, interpolate, type Assertion, type Keyword, type Locator, type Operator, type Step } from '@joule/core';
+import { runCustomCall } from './live-custom';
 
 export type StepStatus = 'running' | 'pass' | 'fail' | 'skip';
 
@@ -21,6 +22,11 @@ export interface LiveRunOptions {
   projectDir: string;
   screenshotDir: string;
   signal: AbortSignal;
+  /**
+   * Runs custom keyword calls with Robot Framework, attached to this page's browser over CDP.
+   * Without it, or without a CDP endpoint (Firefox), custom keyword calls are skipped.
+   */
+  robot?: { python(): Promise<string>; cdpUrl?: string };
   onStep(e: StepEvent): void;
   /** Resolves when the user presses Continue. */
   onPause(stepId: string, message?: string): Promise<void>;
@@ -214,8 +220,7 @@ export class LiveRunner {
       case 'pause':
         return this.o.onPause(step.id, step.message);
       case 'screenshot': {
-        const dir = isAbsolute(this.o.screenshotDir) ? this.o.screenshotDir : join(this.o.projectDir, this.o.screenshotDir);
-        const path = join(dir, `${this.v(step.filename)}.png`);
+        const path = join(this.screenshotDir(), `${this.v(step.filename)}.png`);
         await mkdir(dirname(path), { recursive: true });
         await page.screenshot({ path, fullPage: step.fullPage });
         return;
@@ -229,8 +234,24 @@ export class LiveRunner {
         return this.steps(kw.steps, depth + 1);
       }
       case 'raw':
-      case 'customCall':
-        return 'skip'; // raw Robot lines and custom keywords only run via Robot Framework
+        return 'skip'; // raw Robot lines only run via Robot Framework
+      case 'customCall': {
+        const robot = this.o.robot;
+        if (!robot?.cdpUrl) return 'skip';
+        const r = await runCustomCall({
+          python: await robot.python(),
+          cdpUrl: robot.cdpUrl,
+          page,
+          step,
+          projectDir: this.o.projectDir,
+          params: Object.fromEntries(Object.entries(this.o.params).map(([k, v]) => [k, this.v(v)])),
+          timeoutSeconds: this.o.timeoutSeconds,
+          screenshotDir: this.screenshotDir(),
+          signal: this.o.signal,
+        });
+        if (!r.ok) throw new StepFailure(r.message || 'The custom keyword failed');
+        return;
+      }
       case 'group':
         return this.steps(step.steps, depth + 1);
       case 'if': {
@@ -241,6 +262,10 @@ export class LiveRunner {
         return this.steps(ok ? step.then : step.else, depth + 1);
       }
     }
+  }
+
+  private screenshotDir(): string {
+    return isAbsolute(this.o.screenshotDir) ? this.o.screenshotDir : join(this.o.projectDir, this.o.screenshotDir);
   }
 
   private sleep(ms: number): Promise<void> {

@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
@@ -429,4 +429,79 @@ describe('robot runner', async () => {
     expect(paused).toBe('Check the page');
     expect(result.ok).toBe(true);
   }, 120_000);
+});
+
+describe('custom keywords in the live runner', async () => {
+  const deps = await checkDeps(process.cwd());
+  const KEYWORDS = [
+    '*** Settings ***',
+    'Library    Browser',
+    '',
+    '*** Keywords ***',
+    'Log In As',
+    '    [Arguments]    ${user}    ${password}=secret',
+    '    Fill Text    css=[data-testid="username"]    ${user}',
+    '    Fill Text    css=[data-testid="password"]    ${password}',
+    '',
+    'Expect Welcome',
+    '    Get Text    css=h1    ==    Nobody here',
+    '',
+  ].join('\n');
+
+  async function runCustom(steps: Step[], robot?: { python(): Promise<string>; cdpUrl?: string }, page = session.page!) {
+    const dir = await mkdtemp(join(tmpdir(), 'joule-custom-'));
+    await mkdir(join(dir, 'custom_keywords'));
+    await writeFile(join(dir, 'custom_keywords', 'login.resource'), KEYWORDS);
+    const events: StepEvent[] = [];
+    const ok = await new LiveRunner({
+      page,
+      steps,
+      keywords: [],
+      params: { USERNAME: 'alice' },
+      timeoutSeconds: 5,
+      projectDir: dir,
+      screenshotDir: 'screenshots',
+      signal: new AbortController().signal,
+      robot,
+      onStep: (e) => events.push(e),
+      onPause: async () => {},
+    }).run();
+    return { ok, events };
+  }
+
+  const call = (id: string, keyword: string, args: Record<string, string> = {}): Step =>
+    ({ id, name: '', type: 'customCall', keyword, source: 'custom_keywords/login.resource', args });
+
+  it.runIf(deps.ok)('runs the keyword with Robot Framework on the page shown in the app', async () => {
+    await session.navigate(URL);
+    const page = session.page!;
+    // Another page in the same browser must not be the one Robot drives.
+    const other = await page.context().newPage();
+    try {
+      // The session follows the newest page, so pass the original one explicitly.
+      const robot = { python: async () => deps.python!.path, cdpUrl: session.cdpUrl };
+      const { ok, events } = await runCustom([call('k', 'Log In As', { user: '${USERNAME}' })], robot, page);
+      expect(events.filter((e) => e.status === 'fail')).toEqual([]);
+      expect(ok).toBe(true);
+      expect(await page.inputValue('#username')).toBe('alice');
+      expect(await page.inputValue('#password')).toBe('secret');
+    } finally {
+      await other.close();
+    }
+  }, 60_000);
+
+  it.runIf(deps.ok)('reports the Robot Framework failure message', async () => {
+    await session.navigate(URL);
+    const { ok, events } = await runCustom([call('k', 'Expect Welcome')], { python: async () => deps.python!.path, cdpUrl: session.cdpUrl });
+    expect(ok).toBe(false);
+    const fail = events.find((e) => e.status === 'fail');
+    expect(fail?.id).toBe('k');
+    expect(fail?.message).toContain('Nobody here');
+  }, 60_000);
+
+  it('skips custom keywords without a CDP endpoint (Firefox)', async () => {
+    const { ok, events } = await runCustom([call('k', 'Log In As', { user: 'x' })], { python: async () => 'python', cdpUrl: undefined });
+    expect(ok).toBe(true);
+    expect(events.filter((e) => e.id === 'k').map((e) => e.status)).toEqual(['running', 'skip']);
+  });
 });

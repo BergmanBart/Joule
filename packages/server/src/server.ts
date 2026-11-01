@@ -313,6 +313,13 @@ export async function startServer(opts: ServerOptions) {
       const previousMode = session.getMode();
       await session.setMode('run');
       const events: (StepEvent & { at: string })[] = [];
+      // Checked on the first custom keyword call only, then reused for the rest of the run.
+      let robotPython: Promise<string> | undefined;
+      const livePython = () =>
+        (robotPython ??= checkDeps(dir, toolPaths()).then((deps) => {
+          if (!deps.ok || !deps.python) throw new Error('Custom keywords need Robot Framework with the Browser library: open the dependency check in Settings');
+          return deps.python.path;
+        }));
       emit('run.started', { kind: 'live', testIds: [testId] });
       void (async () => {
         let ok = false;
@@ -328,6 +335,7 @@ export async function startServer(opts: ServerOptions) {
             projectDir: dir,
             screenshotDir: p.settings.screenshotDir,
             signal: abort.signal,
+            robot: { python: livePython, cdpUrl: session.cdpUrl },
             onStep: (e) => {
               events.push({ ...e, at: new Date().toISOString() });
               emit('run.step', e);

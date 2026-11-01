@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import { createServer, type AddressInfo } from 'node:net';
 import { chromium, firefox, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import type { BrowserName, ElementDescriptor } from '@joule/core';
 
@@ -44,14 +45,30 @@ export interface SessionEvents {
   closed: [];
 }
 
-/** Launch a browser for the given setting; falls back to installed Edge / Chrome when bundled browsers are missing. */
-export async function launchBrowser(name: BrowserName, headless: boolean): Promise<Browser> {
+/** A port nothing listens on right now. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Launch a browser for the given setting; falls back to installed Edge / Chrome when bundled browsers are missing.
+ * `debugPort` opens the Chrome DevTools Protocol on 127.0.0.1 (ignored for Firefox).
+ */
+export async function launchBrowser(name: BrowserName, headless: boolean, debugPort?: number): Promise<Browser> {
   if (name === 'firefox') return firefox.launch({ headless });
   const channels = name === 'msedge' ? ['msedge', 'chrome', undefined] : [undefined, 'chrome', 'msedge'];
+  const args = debugPort ? [`--remote-debugging-port=${debugPort}`] : undefined;
   let lastError: unknown;
   for (const channel of channels) {
     try {
-      return await chromium.launch({ headless, channel });
+      return await chromium.launch({ headless, channel, args });
     } catch (e) {
       lastError = e;
     }
@@ -80,6 +97,8 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   private refreshQueued = false;
   private refreshing = false;
   options?: SessionOptions;
+  /** CDP endpoint Robot Framework attaches to for custom keywords; unset for Firefox. */
+  cdpUrl?: string;
 
   get isOpen(): boolean {
     return !!this.page && !this.page.isClosed();
@@ -88,7 +107,9 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   async start(options: SessionOptions, url?: string): Promise<void> {
     await this.stop();
     this.options = options;
-    this.browser = await launchBrowser(options.browser, true);
+    const port = options.browser === 'firefox' ? undefined : await freePort();
+    this.browser = await launchBrowser(options.browser, true, port);
+    this.cdpUrl = port ? `http://127.0.0.1:${port}` : undefined;
     await this.openContext();
     if (url) await this.navigate(url);
   }
@@ -180,7 +201,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     });
     const max = this.frameSize;
     await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, everyNthFrame: 1, maxWidth: max?.width, maxHeight: max?.height }).catch((e) => {
-      if (gen === this.streamGen) throw e;
+      if (gen === this.streamGen && !page.isClosed()) throw e; // a popup may close before its stream starts
     });
   }
 
@@ -197,7 +218,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   async stop(): Promise<void> {
     await this.stopStream();
     const browser = this.browser;
-    this.browser = this.context = this.page = undefined;
+    this.browser = this.context = this.page = this.cdpUrl = undefined;
     if (browser) await browser.close().catch(() => {});
   }
 
